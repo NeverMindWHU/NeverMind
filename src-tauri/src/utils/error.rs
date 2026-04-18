@@ -1,3 +1,4 @@
+use serde::Serialize;
 use sqlx::Error as SqlxError;
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
@@ -41,6 +42,22 @@ impl AppError {
             AppError::AiTimeout => "AI_TIMEOUT",
             AppError::AiUnavailable { .. } => "AI_UNAVAILABLE",
             AppError::AiResponseInvalid { .. } => "AI_RESPONSE_INVALID",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandError {
+    pub code: String,
+    pub message: String,
+}
+
+impl From<AppError> for CommandError {
+    fn from(value: AppError) -> Self {
+        Self {
+            code: value.code().to_string(),
+            message: value.to_string(),
         }
     }
 }

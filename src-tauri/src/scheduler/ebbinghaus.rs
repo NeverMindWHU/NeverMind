@@ -2,7 +2,10 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::{
     models::review::ReviewResult,
-    scheduler::rules::{interval_days_for_step, SKIPPED_DELAY_HOURS},
+    scheduler::rules::{
+        interval_days_for_step, max_review_step, normalize_review_step, INITIAL_REVIEW_STATUS,
+        INITIAL_REVIEW_STEP, SKIPPED_DELAY_HOURS,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,34 +15,44 @@ pub struct NextReviewDecision {
     pub status: &'static str,
 }
 
+pub fn first_review(created_at: DateTime<Utc>) -> NextReviewDecision {
+    NextReviewDecision {
+        next_step: INITIAL_REVIEW_STEP,
+        next_due_at: created_at + Duration::days(interval_days_for_step(INITIAL_REVIEW_STEP)),
+        status: INITIAL_REVIEW_STATUS,
+    }
+}
+
 pub fn next_review(
     current_step: i64,
     result: ReviewResult,
     reviewed_at: DateTime<Utc>,
 ) -> NextReviewDecision {
+    let normalized_step = normalize_review_step(current_step);
+
     match result {
         ReviewResult::Remembered => {
-            let next_step = current_step.max(1) + 1;
+            let next_step = (normalized_step + 1).min(max_review_step());
             let next_due_at = reviewed_at + Duration::days(interval_days_for_step(next_step));
 
             NextReviewDecision {
                 next_step,
                 next_due_at,
-                status: "pending",
+                status: INITIAL_REVIEW_STATUS,
             }
         }
         ReviewResult::Forgotten => NextReviewDecision {
-            next_step: 1,
-            next_due_at: reviewed_at + Duration::days(interval_days_for_step(1)),
-            status: "pending",
+            next_step: INITIAL_REVIEW_STEP,
+            next_due_at: reviewed_at + Duration::days(interval_days_for_step(INITIAL_REVIEW_STEP)),
+            status: INITIAL_REVIEW_STATUS,
         },
         ReviewResult::Skipped => NextReviewDecision {
-            next_step: current_step.max(1),
+            next_step: normalized_step,
             next_due_at: reviewed_at + Duration::hours(SKIPPED_DELAY_HOURS),
-            status: "pending",
+            status: INITIAL_REVIEW_STATUS,
         },
         ReviewResult::Done => NextReviewDecision {
-            next_step: current_step.max(1),
+            next_step: normalized_step,
             next_due_at: reviewed_at,
             status: "done",
         },
@@ -50,8 +63,21 @@ pub fn next_review(
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use super::next_review;
+    use super::{first_review, next_review};
     use crate::models::review::ReviewResult;
+
+    #[test]
+    fn first_review_uses_initial_step_and_one_day_delay() {
+        let created_at = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
+        let decision = first_review(created_at);
+
+        assert_eq!(decision.next_step, 1);
+        assert_eq!(
+            decision.next_due_at,
+            Utc.with_ymd_and_hms(2026, 4, 19, 10, 0, 0).unwrap()
+        );
+        assert_eq!(decision.status, "pending");
+    }
 
     #[test]
     fn remembered_moves_to_next_step() {
@@ -62,6 +88,19 @@ mod tests {
         assert_eq!(
             decision.next_due_at,
             Utc.with_ymd_and_hms(2026, 4, 19, 10, 0, 0).unwrap()
+        );
+        assert_eq!(decision.status, "pending");
+    }
+
+    #[test]
+    fn remembered_stays_at_last_defined_step() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
+        let decision = next_review(6, ReviewResult::Remembered, now);
+
+        assert_eq!(decision.next_step, 6);
+        assert_eq!(
+            decision.next_due_at,
+            Utc.with_ymd_and_hms(2026, 5, 18, 10, 0, 0).unwrap()
         );
         assert_eq!(decision.status, "pending");
     }
@@ -93,11 +132,34 @@ mod tests {
     }
 
     #[test]
+    fn skipped_normalizes_invalid_step_to_first_step() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
+        let decision = next_review(0, ReviewResult::Skipped, now);
+
+        assert_eq!(decision.next_step, 1);
+        assert_eq!(
+            decision.next_due_at,
+            Utc.with_ymd_and_hms(2026, 4, 18, 11, 0, 0).unwrap()
+        );
+        assert_eq!(decision.status, "pending");
+    }
+
+    #[test]
     fn done_marks_schedule_as_completed() {
         let now = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
         let decision = next_review(2, ReviewResult::Done, now);
 
         assert_eq!(decision.next_step, 2);
+        assert_eq!(decision.next_due_at, now);
+        assert_eq!(decision.status, "done");
+    }
+
+    #[test]
+    fn done_normalizes_invalid_step_before_marking_completed() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
+        let decision = next_review(-2, ReviewResult::Done, now);
+
+        assert_eq!(decision.next_step, 1);
         assert_eq!(decision.next_due_at, now);
         assert_eq!(decision.status, "done");
     }

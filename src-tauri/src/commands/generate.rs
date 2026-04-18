@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,8 +17,8 @@ use crate::{
             GeneratedCard, GeneratedCardBatchResult, NewCard, NewGenerationBatch,
             ReviewedGeneratedCardsResult, UpdateCardStatus,
         },
-        review::NewReviewSchedule,
     },
+    scheduler::planner::build_initial_schedule,
     utils::error::{AppError, AppResult},
 };
 
@@ -55,10 +55,6 @@ pub struct ReviewGeneratedCardsInput {
 
 const MAX_SOURCE_TEXT_LEN: usize = 5000;
 
-/// 新卡片的首次复习延迟（小时）。与复习节点序列 [1, 1, 3, 7, 15, 30] 中首个节点对齐。
-/// 后续真正的排期推进由复习模块（scheduler）负责，此处只负责"起点"。
-const FIRST_REVIEW_DELAY_HOURS: i64 = 24;
-
 // ============================================================================
 // 业务函数
 // ============================================================================
@@ -86,7 +82,6 @@ pub async fn generate_cards(
 
     let batch_id = Uuid::new_v4().to_string();
     let now = Utc::now();
-    let first_due_at = now + Duration::hours(FIRST_REVIEW_DELAY_HOURS);
 
     card_dao
         .create_generation_batch(&NewGenerationBatch {
@@ -98,32 +93,32 @@ pub async fn generate_cards(
         })
         .await?;
 
+    let mut schedules = Vec::with_capacity(parsed_cards.len());
     let new_cards: Vec<NewCard> = parsed_cards
         .iter()
-        .map(|p| NewCard {
-            id: Uuid::new_v4().to_string(),
-            batch_id: Some(batch_id.clone()),
-            keyword: p.keyword.clone(),
-            definition: p.definition.clone(),
-            explanation: p.explanation.clone(),
-            source_excerpt: p.source_excerpt.clone(),
-            status: "pending".into(),
-            next_review_at: Some(first_due_at),
+        .map(|p| {
+            let card_id = Uuid::new_v4().to_string();
+            let schedule = build_initial_schedule(Uuid::new_v4().to_string(), card_id.clone(), now);
+            let next_review_at = schedule.due_at;
+            schedules.push(schedule);
+
+            NewCard {
+                id: card_id,
+                batch_id: Some(batch_id.clone()),
+                keyword: p.keyword.clone(),
+                definition: p.definition.clone(),
+                explanation: p.explanation.clone(),
+                source_excerpt: p.source_excerpt.clone(),
+                status: "pending".into(),
+                next_review_at: Some(next_review_at),
+            }
         })
         .collect();
 
     card_dao.insert_cards(&new_cards).await?;
 
-    for card in &new_cards {
-        review_dao
-            .create_schedule(&NewReviewSchedule {
-                id: Uuid::new_v4().to_string(),
-                card_id: card.id.clone(),
-                review_step: 1,
-                due_at: first_due_at,
-                status: "pending".into(),
-            })
-            .await?;
+    for schedule in &schedules {
+        review_dao.create_schedule(schedule).await?;
     }
 
     let cards: Vec<GeneratedCard> = new_cards
@@ -258,6 +253,8 @@ mod tests {
             dao::{card_dao::SqliteCardDao, review_dao::SqliteReviewDao},
             Database,
         },
+        models::review::ReviewSchedule,
+        scheduler::ebbinghaus::first_review,
     };
 
     async fn setup() -> (Database, SqliteCardDao, SqliteReviewDao) {
@@ -280,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn full_generation_flow() {
-        let (_db, card_dao, review_dao) = setup().await;
+        let (db, card_dao, review_dao) = setup().await;
         let llm = MockLlmClient;
 
         let out = generate_cards(&llm, &card_dao, &review_dao, sample_input())
@@ -291,11 +288,29 @@ mod tests {
         assert_eq!(out.cards.len(), 1);
         assert_eq!(out.cards[0].status, "pending");
         assert!(!out.cards[0].related_terms.is_empty(), "首次生成应带出 relatedTerms");
+        let expected_first_review = first_review(out.cards[0].created_at);
+        assert_eq!(out.cards[0].next_review_at, Some(expected_first_review.next_due_at));
+
+        let saved_schedule = sqlx::query_as::<_, ReviewSchedule>(
+            r#"
+            SELECT id, card_id, review_step, due_at, status, created_at, updated_at
+            FROM review_schedule
+            WHERE card_id = ?
+            "#,
+        )
+        .bind(&out.cards[0].card_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(saved_schedule.review_step, expected_first_review.next_step);
+        assert_eq!(saved_schedule.due_at, expected_first_review.next_due_at);
+        assert_eq!(saved_schedule.status, expected_first_review.status);
 
         // list 回来时，扩展字段退化为空数组（DB 未持久化）
         let listed = list_generated_cards(&card_dao, &out.batch_id).await.unwrap();
         assert_eq!(listed.cards.len(), 1);
         assert!(listed.cards[0].related_terms.is_empty());
+        assert_eq!(listed.cards[0].next_review_at, Some(expected_first_review.next_due_at));
 
         // 接受该卡片
         let card_id = out.cards[0].card_id.clone();
