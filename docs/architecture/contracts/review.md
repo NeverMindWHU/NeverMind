@@ -56,7 +56,6 @@
         "keyword": "艾宾浩斯遗忘曲线",
         "definition": "用于描述记忆衰减规律的理论模型",
         "explanation": "帮助系统决定何时提醒复习",
-        "mnemonic": "先记后忘，按点再访",
         "reviewStep": 1,
         "dueAt": "2026-04-18T09:00:00Z",
         "tags": ["记忆", "学习方法"]
@@ -83,7 +82,7 @@
 {
   "reviewId": "uuid",
   "cardId": "uuid",
-  "result": "remembered | forgotten | skipped",
+  "result": "done | remembered | forgotten | skipped",
   "reviewedAt": "2026-04-18T10:00:00Z"
 }
 ```
@@ -137,7 +136,6 @@
   "keyword": "string",
   "definition": "string",
   "explanation": "string",
-  "mnemonic": "string | null",
   "reviewStep": 1,
   "dueAt": "string",
   "tags": ["string"]
@@ -148,7 +146,7 @@
 
 ```json
 {
-  "result": "remembered | forgotten | skipped",
+  "result": "done | remembered | forgotten | skipped",
   "reviewedAt": "string"
 }
 ```
@@ -157,6 +155,7 @@
 
 ## 5. 排期规则约定
 
+- `done`：后续不再考
 - `remembered`：进入下一复习节点
 - `forgotten`：回退到初始节点或重置为第一阶段
 - `skipped`：不计入掌握情况，可保留原节点并推迟到最近可复习时间
