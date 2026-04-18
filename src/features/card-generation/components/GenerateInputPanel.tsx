@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Image as ImageIcon, Trash2, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ClipboardPaste, Image as ImageIcon, Trash2, Upload } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/Button";
 import { FieldLabel, Input, Panel, Textarea, Select } from "@/components/Card";
@@ -26,7 +26,7 @@ interface ImageItem {
  * 卡片生成输入面板：
  * - 文本区域（可选）
  * - 关键词 + 上下文标题（可选）
- * - 图片（可选，多张，前端读为 base64 data URL 后交给 Ark 多模态）
+ * - 图片（可选，多张，通过剪贴板粘贴：Cmd/Ctrl+V 或点击"从剪贴板粘贴"按钮）
  * - 来源类型选择（手动/划选/导入/图片）
  */
 export function GenerateInputPanel({ submitting, onSubmit }: Props) {
@@ -36,36 +36,106 @@ export function GenerateInputPanel({ submitting, onSubmit }: Props) {
   const [contextTitle, setContextTitle] = useState("");
   const [sourceType, setSourceType] = useState<SourceType>("manual");
   const [images, setImages] = useState<ImageItem[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handlePickImages(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const incoming = Array.from(files);
-    if (images.length + incoming.length > MAX_IMAGE_COUNT) {
-      toast.error("图片数量超限", `单次最多 ${MAX_IMAGE_COUNT} 张`);
-      return;
-    }
-    for (const f of incoming) {
+  // 把"处理图片文件"的最新闭包挂进 ref，供永久挂载的全局 paste 监听器调用。
+  // 这样就不用因状态变化反复拆装 window 事件监听。
+  const addFilesRef = useRef<(files: File[]) => void>(() => {});
+
+  function addImageFiles(files: File[]) {
+    if (files.length === 0) return;
+    for (const f of files) {
+      if (!f.type.startsWith("image/")) continue;
       if (f.size > MAX_IMAGE_BYTES) {
-        toast.error("图片过大", `${f.name} 超过 ${formatBytes(MAX_IMAGE_BYTES)}`);
+        toast.error(
+          "图片过大",
+          `${f.name || "剪贴板图片"} 超过 ${formatBytes(MAX_IMAGE_BYTES)}`
+        );
         continue;
       }
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
-        setImages((prev) => [
-          ...prev,
-          {
-            id: `${f.name}-${f.size}-${prev.length}-${Math.random().toString(16).slice(2, 6)}`,
-            dataUrl,
-            name: f.name,
-            size: f.size,
-          },
-        ]);
+        setImages((prev) => {
+          if (prev.length >= MAX_IMAGE_COUNT) {
+            toast.error("图片数量超限", `单次最多 ${MAX_IMAGE_COUNT} 张`);
+            return prev;
+          }
+          const displayName = f.name || `pasted-${Date.now()}.png`;
+          return [
+            ...prev,
+            {
+              id: `${displayName}-${f.size}-${prev.length}-${Math.random()
+                .toString(16)
+                .slice(2, 6)}`,
+              dataUrl,
+              name: displayName,
+              size: f.size,
+            },
+          ];
+        });
       };
       reader.onerror = () =>
-        toast.error("读取失败", `${f.name} 无法读取为 base64`);
+        toast.error("读取失败", `${f.name || "剪贴板图片"} 无法读取为 base64`);
       reader.readAsDataURL(f);
+    }
+  }
+
+  addFilesRef.current = addImageFiles;
+
+  // 全局监听 paste：用户在页面任意位置 Cmd/Ctrl+V 粘贴图片都能命中。
+  // 仅当剪贴板里**含有图片文件**时才 preventDefault，避免干扰纯文本粘贴到文本框。
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const files: File[] = [];
+      for (const item of Array.from(dt.items)) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        addFilesRef.current(files);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
+  /**
+   * 显式点按钮从剪贴板取图片。走 async Clipboard API，比 onpaste 多覆盖一种
+   * 场景：用户从外部工具复制了图片但还没进入输入框聚焦。
+   */
+  async function pasteFromClipboard() {
+    if (typeof navigator === "undefined" || !navigator.clipboard?.read) {
+      toast.info("请使用 Cmd/Ctrl+V", "当前环境不支持直接读取剪贴板，手动粘贴即可。");
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const it of items) {
+        for (const type of it.types) {
+          if (!type.startsWith("image/")) continue;
+          const blob = await it.getType(type);
+          const ext = type.split("/")[1]?.split("+")[0] ?? "png";
+          files.push(
+            new File([blob], `pasted-${Date.now()}.${ext}`, { type })
+          );
+        }
+      }
+      if (files.length === 0) {
+        toast.info("剪贴板里没有图片", "先复制一张图片，再点这里或按 Cmd/Ctrl+V。");
+        return;
+      }
+      addImageFiles(files);
+    } catch (err) {
+      toast.error(
+        "读取剪贴板失败",
+        err instanceof Error ? err.message : String(err)
+      );
     }
   }
 
@@ -153,7 +223,23 @@ export function GenerateInputPanel({ submitting, onSubmit }: Props) {
         </div>
 
         <div>
-          <FieldLabel>图片（可选，多模态）</FieldLabel>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <FieldLabel className="mb-0">图片（可选，多模态）</FieldLabel>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<ClipboardPaste className="h-4 w-4" />}
+              onClick={() => void pasteFromClipboard()}
+              disabled={images.length >= MAX_IMAGE_COUNT}
+            >
+              从剪贴板粘贴
+            </Button>
+          </div>
+          <div className="mb-2 text-[11px] leading-relaxed text-ink-500">
+            直接在本页按 <kbd className="rounded border border-ink-200 bg-ink-50 px-1 py-0.5 text-[10px] font-mono text-ink-700">Cmd/Ctrl+V</kbd> 粘贴截图，
+            或点上方按钮读取剪贴板。图片越多/越大，豆包视觉推理耗时越长
+            （通常 30–90 秒，峰值可能超过 2 分钟），建议优先控制在 3 张以内、单张 ≤ 2MB。
+          </div>
           <div className="flex flex-wrap items-start gap-3">
             {images.map((img) => (
               <div
@@ -177,27 +263,27 @@ export function GenerateInputPanel({ submitting, onSubmit }: Props) {
                 </div>
               </div>
             ))}
-            {images.length < MAX_IMAGE_COUNT && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-ink-300 bg-ink-50 text-ink-500 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600"
+            {images.length === 0 && (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => void pasteFromClipboard()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void pasteFromClipboard();
+                  }
+                }}
+                className="flex h-24 min-w-[12rem] flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-ink-300 bg-ink-50 px-3 text-center text-ink-500 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600"
               >
                 <ImageIcon className="h-5 w-5" />
-                <span className="text-[11px]">添加图片</span>
-              </button>
+                <span className="text-[11px] leading-relaxed">
+                  按 Cmd/Ctrl+V 粘贴图片
+                  <br />
+                  或点这里从剪贴板读取
+                </span>
+              </div>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                handlePickImages(e.target.files);
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
 

@@ -68,13 +68,13 @@ export function ReviewCard({ card, submitting, onSubmit }: Props) {
               <BadgeCheck className="h-3.5 w-3.5" />
               第 {card.reviewStep} 次复习 · 到期 {formatRelative(card.dueAt)}
             </div>
-            <h2 className="text-center text-3xl font-semibold leading-tight text-ink-900">
-              {card.keyword}
+            <h2 className="text-center text-2xl font-semibold leading-snug text-ink-900 md:text-3xl">
+              {card.question || `${card.keyword}是什么？`}
             </h2>
-            {card.tags.length > 0 && (
+            {(card.keywords?.length ?? 0) > 0 && (
               <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                {card.tags.map((t) => (
-                  <Tag key={t}>
+                {card.keywords.map((t) => (
+                  <Tag key={t} tone="brand">
                     <TagIcon className="mr-1 h-3 w-3" />
                     {t}
                   </Tag>
@@ -94,9 +94,20 @@ export function ReviewCard({ card, submitting, onSubmit }: Props) {
           >
             <header>
               <div className="text-[11px] uppercase tracking-wider text-ink-400">
-                Keyword
+                Question
               </div>
-              <h2 className="mt-0.5 text-2xl font-semibold text-ink-900">{card.keyword}</h2>
+              <h2 className="mt-0.5 text-xl font-semibold leading-snug text-ink-900">
+                {card.question || `${card.keyword}是什么？`}
+              </h2>
+              {(card.keywords?.length ?? 0) > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {card.keywords.map((k) => (
+                    <Tag key={k} tone="brand">
+                      {k}
+                    </Tag>
+                  ))}
+                </div>
+              )}
             </header>
 
             <section>

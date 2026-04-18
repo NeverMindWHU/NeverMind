@@ -6,8 +6,10 @@ import {
   Settings as SettingsIcon,
   Sparkles,
   LibraryBig,
+  Loader2,
 } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
+import { useGenerationTasks } from "@/features/generation-tasks/GenerationTasksContext";
 
 interface NavItem {
   to: string;
@@ -25,6 +27,7 @@ const NAV: NavItem[] = [
 ];
 
 export function AppShell() {
+  const { runningCount } = useGenerationTasks();
   return (
     <div className="flex h-full min-h-screen">
       <aside className="flex w-60 flex-none flex-col border-r border-ink-200 bg-white">
@@ -61,8 +64,19 @@ export function AppShell() {
                       isActive ? "text-brand-600" : "text-ink-500 group-hover:text-ink-700"
                     )}
                   />
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{n.label}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 truncate font-medium">
+                      <span className="truncate">{n.label}</span>
+                      {n.to === "/generate" && runningCount > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium text-brand-700"
+                          title={`后台有 ${runningCount} 个生成任务进行中`}
+                        >
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                          {runningCount}
+                        </span>
+                      )}
+                    </div>
                     <div
                       className={clsx(
                         "truncate text-[11px]",

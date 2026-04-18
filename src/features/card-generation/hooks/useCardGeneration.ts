@@ -2,16 +2,12 @@ import { useCallback, useState } from "react";
 import { useToast } from "@/lib/toast";
 import { humanizeError } from "@/lib/format";
 import { rememberBatch } from "@/lib/recent-batches";
-import type { GenerateCardsInput, GeneratedCardBatchResult } from "@/types/card";
+import type { GeneratedCardBatchResult } from "@/types/card";
 import type { CommandError } from "@/types/common";
-import {
-  generateCards as apiGenerate,
-  reviewGeneratedCards as apiReview,
-} from "../services/api";
+import { reviewGeneratedCards as apiReview } from "../services/api";
 
 export interface CardGenerationState {
   batch: GeneratedCardBatchResult | null;
-  loading: boolean;
   submitting: boolean;
   error: CommandError | null;
   accepted: Set<string>;
@@ -19,55 +15,42 @@ export interface CardGenerationState {
 }
 
 /**
- * 统一管理一次"生成 → 预览 → 接受/拒绝"的状态机。
+ * 管理一次"预览 → 接受/拒绝 → 保存"的状态机。
  *
- * 设计取舍：
- * - 本批次结束前都驻留在 state.batch，用户切走再回来不丢失（页面卸载才清空）。
- * - accepted / rejected 用 `Set<cardId>`，提交前两边互斥，未归类的卡片视为"未决"。
+ * 设计变更（v2 异步化后）：
+ * - **不再**持有 "生成中" 的 loading 状态，生成流程交给全局
+ *   `GenerationTasksProvider` 后台处理。
+ * - 本 Hook 只关心"已经拿到 batch 后怎么展示 + 入库"。
+ * - 调用方通过 `hydrateBatch(batch)` 把任务完成后的结果塞进来，
+ *   本 Hook 会自动把所有卡片预选为 accepted，用户可再微调。
  */
 export function useCardGeneration() {
   const toast = useToast();
   const [state, setState] = useState<CardGenerationState>({
     batch: null,
-    loading: false,
     submitting: false,
     error: null,
     accepted: new Set(),
     rejected: new Set(),
   });
 
-  const generate = useCallback(
-    async (input: GenerateCardsInput) => {
-      setState((s) => ({ ...s, loading: true, error: null }));
-      try {
-        const batch = await apiGenerate(input);
-        setState({
-          batch,
-          loading: false,
-          submitting: false,
-          error: null,
-          accepted: new Set(batch.cards.map((c) => c.cardId)),
-          rejected: new Set(),
-        });
-        // 生成当下就把 batch 登记到"最近批次"，即使用户没点保存，
-        // 也能在宝库页面按 batchId 找回（后端已完整落库 pending 卡片）。
-        rememberBatch({
-          batchId: batch.batchId,
-          title: batch.cards[0]?.keyword,
-          cardCount: batch.cards.length,
-          sourceType: input.sourceType,
-        });
-        toast.success("生成成功", `共产出 ${batch.cards.length} 张卡片`);
-        return batch;
-      } catch (err) {
-        const ce = err as CommandError;
-        setState((s) => ({ ...s, loading: false, error: ce }));
-        toast.error("生成失败", humanizeError(ce));
-        throw err;
-      }
-    },
-    [toast]
-  );
+  /**
+   * 把后台生成好的批次填充到预览区。
+   * 默认全部预选 accepted，符合用户"先看后筛"心智。
+   * 重复 hydrate 同一个 batchId 会被忽略，避免用户已调整过的 accepted/rejected 被覆盖。
+   */
+  const hydrateBatch = useCallback((batch: GeneratedCardBatchResult) => {
+    setState((prev) => {
+      if (prev.batch?.batchId === batch.batchId) return prev;
+      return {
+        batch,
+        submitting: false,
+        error: null,
+        accepted: new Set(batch.cards.map((c) => c.cardId)),
+        rejected: new Set(),
+      };
+    });
+  }, []);
 
   const toggleAccept = useCallback((cardId: string) => {
     setState((s) => {
@@ -122,11 +105,11 @@ export function useCardGeneration() {
         acceptCardIds: Array.from(state.accepted),
         rejectCardIds: Array.from(state.rejected),
       });
-      // 刷新"最近批次"里的卡片数，保证宝库统计同步。
       if (state.batch) {
         rememberBatch({
           batchId: state.batch.batchId,
-          title: state.batch.cards[0]?.keyword,
+          title:
+            state.batch.cards[0]?.question ?? state.batch.cards[0]?.keyword,
           cardCount: result.acceptedCount + result.pendingCount,
         });
       }
@@ -138,7 +121,6 @@ export function useCardGeneration() {
       );
       setState({
         batch: null,
-        loading: false,
         submitting: false,
         error: null,
         accepted: new Set(),
@@ -156,7 +138,6 @@ export function useCardGeneration() {
   const reset = useCallback(() => {
     setState({
       batch: null,
-      loading: false,
       submitting: false,
       error: null,
       accepted: new Set(),
@@ -166,7 +147,7 @@ export function useCardGeneration() {
 
   return {
     ...state,
-    generate,
+    hydrateBatch,
     toggleAccept,
     toggleReject,
     acceptAll,

@@ -28,8 +28,11 @@ pub struct ArkLlmClient {
 
 impl ArkLlmClient {
     pub fn new(config: ArkConfig) -> AppResult<Self> {
+        // 注意：整体 request timeout 不在 client builder 层统一配置，
+        // 而是改到每个 request 里根据是否带图片动态选择（见 `send`）。
+        // 这里只保留 `connect_timeout`，避免 TCP/TLS 握手卡住吃掉整体预算。
         let http = reqwest::Client::builder()
-            .timeout(config.timeout)
+            .connect_timeout(config.connect_timeout)
             .build()
             .map_err(|e| AppError::AiUnavailable {
                 message: format!("HTTP 客户端初始化失败: {}", e),
@@ -64,11 +67,17 @@ impl ArkLlmClient {
         ])
     }
 
-    async fn send(&self, body: Value) -> AppResult<String> {
+    async fn send(&self, body: Value, has_images: bool) -> AppResult<String> {
+        // 关键：整体 timeout 在这里 per-request 配置。
+        // - 纯文本：config.text_timeout（默认 90s）
+        // - 多模态：config.vision_timeout（默认 180s）
+        //   图片走 base64 data URL 时上传体积 + 视觉推理耗时都很显著，
+        //   原来的 30s 统一超时几乎必触顶（用户反馈的"AI 调用超时"即此）。
         let response = self
             .http
             .post(self.config.chat_completions_url())
             .bearer_auth(&self.config.api_key)
+            .timeout(self.config.timeout_for(has_images))
             .json(&body)
             .send()
             .await
@@ -111,7 +120,7 @@ impl LlmClient for ArkLlmClient {
             "messages": Self::build_messages(&request),
             "temperature": self.config.temperature,
         });
-        self.send(body).await
+        self.send(body, request.has_images()).await
     }
 }
 

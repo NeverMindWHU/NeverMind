@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{
-    commands::{generate, review, settings},
+    commands::{generate, library, review, settings},
     models::card::{GeneratedCardBatchResult, ReviewedGeneratedCardsResult},
     state::AppState,
     utils::error::CommandError,
@@ -49,6 +49,16 @@ pub async fn list_due_reviews(
     input: review::ListDueReviewsInput,
 ) -> Result<review::CommandResponse<review::ListDueReviewsData>, CommandError> {
     review::list_due_reviews(state.inner(), input)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_upcoming_reviews(
+    state: State<'_, AppState>,
+    input: review::ListUpcomingReviewsInput,
+) -> Result<review::CommandResponse<review::ListUpcomingReviewsData>, CommandError> {
+    review::list_upcoming_reviews(state.inner(), input)
         .await
         .map_err(CommandError::from)
 }
@@ -115,6 +125,38 @@ pub async fn test_model_profile(
     input: settings::TestModelProfileInput,
 ) -> Result<settings::CommandResponse<settings::TestModelProfileData>, CommandError> {
     settings::test_model_profile(input)
+        .await
+        .map_err(CommandError::from)
+}
+
+// ---- 宝库（Library）-------------------------------------------------------
+
+#[tauri::command]
+pub async fn library_search_by_keyword(
+    state: State<'_, AppState>,
+    input: library::SearchByKeywordInput,
+) -> Result<library::SearchCardsResult, CommandError> {
+    library::search_by_keyword(state.card_dao.as_ref(), input)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn library_search_by_question(
+    state: State<'_, AppState>,
+    input: library::SearchByQuestionInput,
+) -> Result<library::SearchCardsResult, CommandError> {
+    library::search_by_question(state.card_dao.as_ref(), input)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn library_list_keyword_buckets(
+    state: State<'_, AppState>,
+    input: library::ListKeywordBucketsInput,
+) -> Result<library::KeywordBucketsResult, CommandError> {
+    library::list_keyword_buckets(state.card_dao.as_ref(), input)
         .await
         .map_err(CommandError::from)
 }

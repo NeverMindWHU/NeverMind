@@ -38,7 +38,12 @@ pub struct ListDueReviewsInput {
 pub struct DueReviewCard {
     pub review_id: String,
     pub card_id: String,
+    /// 主关键词（兼容旧 UI）。
     pub keyword: String,
+    /// v2 新增：完整问题文本（正面展示用）。
+    pub question: String,
+    /// v2 新增：3 个关键词（复习页背面 tag 展示用）。
+    pub keywords: Vec<String>,
     pub definition: String,
     pub explanation: String,
     pub review_step: i64,
@@ -59,6 +64,28 @@ pub struct ListDueReviewsData {
     pub items: Vec<DueReviewCard>,
     pub next_cursor: Option<String>,
     pub summary: DueReviewsSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUpcomingReviewsInput {
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpcomingReviewsSummary {
+    /// 尚未到期（`due_at > now`）的 pending review 总数。
+    pub upcoming_count: i64,
+    /// 最早到期时间；若无 upcoming 则为 None。
+    pub earliest_due_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUpcomingReviewsData {
+    pub items: Vec<DueReviewCard>,
+    pub summary: UpcomingReviewsSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +136,27 @@ pub async fn list_due_reviews(
         summary: DueReviewsSummary {
             due_count,
             completed_today,
+        },
+    }))
+}
+
+/// 当"今日到期"队列清空时，前端可以调用本命令把**下一轮**（尚未到期）的
+/// pending review 提前拉出来让用户先刷。提交结果后仍走正常 Ebbinghaus 推进，
+/// 与"准点复习"等价。
+pub async fn list_upcoming_reviews(
+    state: &AppState,
+    input: ListUpcomingReviewsInput,
+) -> AppResult<CommandResponse<ListUpcomingReviewsData>> {
+    let limit = input.limit.unwrap_or(20).clamp(1, 100);
+    let items = state.review_dao.list_upcoming_reviews(limit).await?;
+    let upcoming_count = state.review_dao.count_upcoming_reviews().await?;
+    let earliest_due_at = items.first().map(|it| it.due_at);
+
+    Ok(CommandResponse::ok(ListUpcomingReviewsData {
+        items: items.into_iter().map(map_due_review_item).collect(),
+        summary: UpcomingReviewsSummary {
+            upcoming_count,
+            earliest_due_at,
         },
     }))
 }
@@ -179,15 +227,33 @@ pub async fn get_review_dashboard(
 }
 
 fn map_due_review_item(item: DueReviewItem) -> DueReviewCard {
+    // 老数据 question 可能是空串、keywords 可能是 "[]" / 空串，
+    // 这里按宝库同款规则做兜底：question → "{keyword}是什么？"，keywords → [keyword]。
+    let question = {
+        let q = item.question.trim();
+        if q.is_empty() {
+            format!("{}是什么？", item.keyword)
+        } else {
+            q.to_string()
+        }
+    };
+    let mut keywords: Vec<String> = serde_json::from_str(&item.keywords).unwrap_or_default();
+    if keywords.is_empty() && !item.keyword.trim().is_empty() {
+        keywords.push(item.keyword.clone());
+    }
+
     DueReviewCard {
         review_id: item.review_id,
         card_id: item.card_id,
         keyword: item.keyword,
+        question,
+        keywords: keywords.clone(),
         definition: item.definition,
         explanation: item.explanation,
         review_step: item.review_step,
         due_at: item.due_at,
-        tags: Vec::new(),
+        // 旧版 tags 字段保留向后兼容；直接复用 keywords 让前端旧 UI 也能工作。
+        tags: keywords,
     }
 }
 
@@ -246,8 +312,9 @@ mod tests {
     use sqlx::{migrate::Migrator, query_scalar, sqlite::SqlitePoolOptions, SqlitePool};
 
     use super::{
-        calculate_streak_days, get_review_dashboard, list_due_reviews, submit_review_result,
-        ListDueReviewsInput, SubmitReviewResultInput,
+        calculate_streak_days, get_review_dashboard, list_due_reviews, list_upcoming_reviews,
+        submit_review_result, ListDueReviewsInput, ListUpcomingReviewsInput,
+        SubmitReviewResultInput,
     };
     use crate::{models::review::ReviewResult, state::AppState};
 
@@ -347,7 +414,14 @@ mod tests {
         assert_eq!(response.data.summary.completed_today, 1);
         assert_eq!(response.data.items[0].review_id, "review-due-1");
         assert_eq!(response.data.items[1].review_id, "review-due-2");
-        assert!(response.data.items.iter().all(|item| item.tags.is_empty()));
+        // v2：DueReviewCard 会把 keywords 字段解析并回填 tags。老数据（seed 里没写
+        // question / keywords）的 tags 会等同 [keyword]，question 会被兜底成
+        // "<keyword>是什么？"。
+        for item in &response.data.items {
+            assert_eq!(item.tags, vec![item.keyword.clone()]);
+            assert_eq!(item.keywords, vec![item.keyword.clone()]);
+            assert_eq!(item.question, format!("{}是什么？", item.keyword));
+        }
     }
 
     #[tokio::test]
@@ -456,6 +530,91 @@ mod tests {
             response.data.next_due_at,
             Some(now - Duration::minutes(10))
         );
+    }
+
+    /// 提前复习：只返回 `due_at > now` 的 pending / accepted 卡片，按最早到期排序；
+    /// 已到期 / 已拒绝卡片不应混入。
+    #[tokio::test]
+    async fn list_upcoming_reviews_returns_only_future_pending_cards() {
+        let (state, pool) = setup_test_state().await;
+        let now = Utc::now();
+
+        seed_card_and_schedule(
+            &pool,
+            "review-due-past",
+            "card-due-past",
+            "已到期",
+            now - Duration::minutes(5),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-up-soon",
+            "card-up-soon",
+            "明天到期",
+            now + Duration::hours(12),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-up-later",
+            "card-up-later",
+            "下周到期",
+            now + Duration::days(7),
+            2,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-up-rejected",
+            "card-up-rejected",
+            "未来但被拒绝",
+            now + Duration::days(2),
+            1,
+            "rejected",
+            "pending",
+        )
+        .await;
+
+        let response = list_upcoming_reviews(
+            &state,
+            ListUpcomingReviewsInput { limit: Some(10) },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.data.items.len(), 2);
+        assert_eq!(response.data.summary.upcoming_count, 2);
+        assert_eq!(response.data.items[0].review_id, "review-up-soon");
+        assert_eq!(response.data.items[1].review_id, "review-up-later");
+        assert_eq!(
+            response.data.summary.earliest_due_at,
+            Some(response.data.items[0].due_at)
+        );
+    }
+
+    /// 提前复习队列为空时，summary 返回 0 / None，不 panic。
+    #[tokio::test]
+    async fn list_upcoming_reviews_handles_empty_queue() {
+        let (state, _pool) = setup_test_state().await;
+
+        let response = list_upcoming_reviews(&state, ListUpcomingReviewsInput::default())
+            .await
+            .unwrap();
+
+        assert!(response.success);
+        assert!(response.data.items.is_empty());
+        assert_eq!(response.data.summary.upcoming_count, 0);
+        assert_eq!(response.data.summary.earliest_due_at, None);
     }
 
     /// 回归测试：当库中没有任何 accepted 卡片时，聚合 `SELECT MIN(...)` 会返回一行 NULL。

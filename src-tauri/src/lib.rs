@@ -35,6 +35,7 @@ pub fn run() {
             commands::ipc::list_generated_cards,
             commands::ipc::review_generated_cards,
             commands::ipc::list_due_reviews,
+            commands::ipc::list_upcoming_reviews,
             commands::ipc::submit_review_result,
             commands::ipc::get_review_dashboard,
             commands::ipc::get_settings,
@@ -42,6 +43,9 @@ pub fn run() {
             commands::ipc::list_model_profiles,
             commands::ipc::save_model_profile,
             commands::ipc::test_model_profile,
+            commands::ipc::library_search_by_keyword,
+            commands::ipc::library_search_by_question,
+            commands::ipc::library_list_keyword_buckets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

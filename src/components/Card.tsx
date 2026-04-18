@@ -67,12 +67,16 @@ export function StatTile({
 export function FieldLabel({
   children,
   required,
+  className,
 }: {
   children: ReactNode;
   required?: boolean;
+  className?: string;
 }) {
   return (
-    <label className="mb-1 block text-xs font-medium text-ink-600">
+    <label
+      className={clsx("mb-1 block text-xs font-medium text-ink-600", className)}
+    >
       {children}
       {required && <span className="ml-1 text-rose-500">*</span>}
     </label>

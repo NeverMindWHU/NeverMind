@@ -49,6 +49,12 @@ pub struct DueReviewItem {
     pub review_id: String,
     pub card_id: String,
     pub keyword: String,
+    /// v2 新增：完整问题文本（疑问句）。老数据为空串。
+    #[sqlx(default)]
+    pub question: String,
+    /// v2 新增：3 个关键词的 JSON 字符串。老数据为 "[]"。
+    #[sqlx(default)]
+    pub keywords: String,
     pub definition: String,
     pub explanation: String,
     pub review_step: i64,

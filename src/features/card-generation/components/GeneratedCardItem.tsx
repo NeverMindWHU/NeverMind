@@ -42,8 +42,8 @@ export function GeneratedCardItem({ index, card, decision, onAccept, onReject }:
           <div className="text-[11px] uppercase tracking-wider text-ink-400">
             Card #{index + 1}
           </div>
-          <h3 className="mt-0.5 truncate text-lg font-semibold text-ink-900">
-            {card.keyword}
+          <h3 className="mt-0.5 text-lg font-semibold leading-6 text-ink-900">
+            {card.question || `${card.keyword}是什么？`}
           </h3>
         </div>
         <div className="flex flex-none items-center gap-2">
@@ -65,6 +65,17 @@ export function GeneratedCardItem({ index, card, decision, onAccept, onReject }:
           </Button>
         </div>
       </header>
+
+      {card.keywords && card.keywords.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          {card.keywords.map((k) => (
+            <Tag key={k} tone="brand">
+              <TagIcon className="mr-1 h-3 w-3" />
+              {k}
+            </Tag>
+          ))}
+        </div>
+      )}
 
       <p className="text-sm leading-6 text-ink-800">{card.definition}</p>
 

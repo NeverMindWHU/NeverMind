@@ -137,6 +137,8 @@ pub async fn generate_cards(
                 id: card_id,
                 batch_id: Some(batch_id.clone()),
                 keyword: p.keyword.clone(),
+                question: p.question.clone(),
+                keywords: p.keywords.clone(),
                 definition: p.definition.clone(),
                 explanation: p.explanation.clone(),
                 source_excerpt: p.source_excerpt.clone(),
@@ -158,6 +160,8 @@ pub async fn generate_cards(
         .map(|(new_card, parsed)| GeneratedCard {
             card_id: new_card.id,
             keyword: new_card.keyword,
+            question: new_card.question,
+            keywords: new_card.keywords,
             definition: new_card.definition,
             explanation: new_card.explanation,
             related_terms: parsed.related_terms,
@@ -167,6 +171,7 @@ pub async fn generate_cards(
             created_at: now,
             review_history: Vec::new(),
             next_review_at: new_card.next_review_at,
+            batch_id: Some(batch_id.clone()),
         })
         .collect();
 
@@ -425,6 +430,8 @@ mod tests {
                 id: "card-legacy".into(),
                 batch_id: Some("batch-legacy".into()),
                 keyword: "legacy".into(),
+                question: "legacy 是什么？".into(),
+                keywords: vec!["legacy".into()],
                 definition: "def".into(),
                 explanation: "exp".into(),
                 source_excerpt: None,

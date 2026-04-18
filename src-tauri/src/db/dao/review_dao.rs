@@ -12,6 +12,11 @@ pub trait ReviewDao: Send + Sync {
     async fn create_schedule(&self, schedule: &NewReviewSchedule) -> AppResult<()>;
     async fn list_due_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>>;
     async fn count_due_reviews(&self) -> AppResult<i64>;
+    /// 列出**尚未到期**的 pending review，按到期时间升序。
+    /// 供"提前复习下一轮"入口使用。
+    async fn list_upcoming_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>>;
+    /// 尚未到期（`due_at > now`）的 pending review 总数。
+    async fn count_upcoming_reviews(&self) -> AppResult<i64>;
     async fn get_schedule(&self, review_id: &str) -> AppResult<ReviewSchedule>;
     async fn update_schedule_after_review(
         &self,
@@ -69,6 +74,8 @@ impl ReviewDao for SqliteReviewDao {
             SELECT rs.id AS review_id,
                    c.id AS card_id,
                    c.keyword,
+                   c.question,
+                   c.keywords,
                    c.definition,
                    c.explanation,
                    rs.review_step,
@@ -99,6 +106,55 @@ impl ReviewDao for SqliteReviewDao {
             WHERE rs.status = 'pending'
               AND c.status = 'accepted'
               AND rs.due_at <= ?
+            "#,
+        )
+        .bind(Utc::now())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    async fn list_upcoming_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>> {
+        // 与 list_due_reviews 对称，只是条件改为 due_at > now。
+        // 按最早到期排序，"最接近到期"的卡先上。
+        let items = sqlx::query_as::<_, DueReviewItem>(
+            r#"
+            SELECT rs.id AS review_id,
+                   c.id AS card_id,
+                   c.keyword,
+                   c.question,
+                   c.keywords,
+                   c.definition,
+                   c.explanation,
+                   rs.review_step,
+                   rs.due_at
+            FROM review_schedule rs
+            INNER JOIN cards c ON c.id = rs.card_id
+            WHERE rs.status = 'pending'
+              AND c.status = 'accepted'
+              AND rs.due_at > ?
+            ORDER BY rs.due_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(Utc::now())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(items)
+    }
+
+    async fn count_upcoming_reviews(&self) -> AppResult<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM review_schedule rs
+            INNER JOIN cards c ON c.id = rs.card_id
+            WHERE rs.status = 'pending'
+              AND c.status = 'accepted'
+              AND rs.due_at > ?
             "#,
         )
         .bind(Utc::now())
