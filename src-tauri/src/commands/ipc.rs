@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{
-    commands::{generate, review},
+    commands::{generate, review, settings},
     models::card::{GeneratedCardBatchResult, ReviewedGeneratedCardsResult},
     state::AppState,
     utils::error::CommandError,
@@ -68,6 +68,53 @@ pub async fn get_review_dashboard(
     state: State<'_, AppState>,
 ) -> Result<review::CommandResponse<review::ReviewDashboardData>, CommandError> {
     review::get_review_dashboard(state.inner())
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_settings(
+    state: State<'_, AppState>,
+) -> Result<settings::CommandResponse<settings::AppSettingsData>, CommandError> {
+    settings::get_settings(state.inner())
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn update_settings(
+    state: State<'_, AppState>,
+    input: settings::UpdateSettingsInput,
+) -> Result<settings::CommandResponse<settings::UpdateSettingsData>, CommandError> {
+    settings::update_settings(state.inner(), input)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_model_profiles(
+    state: State<'_, AppState>,
+) -> Result<settings::CommandResponse<settings::ListModelProfilesData>, CommandError> {
+    settings::list_model_profiles(state.inner())
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn save_model_profile(
+    state: State<'_, AppState>,
+    input: settings::SaveModelProfileInput,
+) -> Result<settings::CommandResponse<settings::SaveModelProfileData>, CommandError> {
+    settings::save_model_profile(state.inner(), input)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn test_model_profile(
+    input: settings::TestModelProfileInput,
+) -> Result<settings::CommandResponse<settings::TestModelProfileData>, CommandError> {
+    settings::test_model_profile(input)
         .await
         .map_err(CommandError::from)
 }

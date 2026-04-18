@@ -37,6 +37,11 @@ pub fn run() {
             commands::ipc::list_due_reviews,
             commands::ipc::submit_review_result,
             commands::ipc::get_review_dashboard,
+            commands::ipc::get_settings,
+            commands::ipc::update_settings,
+            commands::ipc::list_model_profiles,
+            commands::ipc::save_model_profile,
+            commands::ipc::test_model_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

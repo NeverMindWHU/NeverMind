@@ -15,6 +15,12 @@ pub enum AppError {
     NotFound { entity: &'static str },
     #[error("validation error: {message}")]
     Validation { message: String },
+    #[error("invalid settings: {message}")]
+    InvalidSettings { message: String },
+    #[error("invalid time format: {message}")]
+    InvalidTimeFormat { message: String },
+    #[error("invalid path: {message}")]
+    InvalidPath { message: String },
     #[error("invalid review operation: {message}")]
     InvalidReviewOperation { message: String },
     #[error("ai timeout")]
@@ -23,6 +29,10 @@ pub enum AppError {
     AiUnavailable { message: String },
     #[error("ai response invalid: {message}")]
     AiResponseInvalid { message: String },
+    #[error("model connection failed: {message}")]
+    ModelConnectionFailed { message: String },
+    #[error("model auth failed")]
+    ModelAuthFailed,
 }
 
 impl AppError {
@@ -35,13 +45,19 @@ impl AppError {
                 "generation_batch" => "GENERATION_BATCH_NOT_FOUND",
                 "review_schedule" => "REVIEW_NOT_FOUND",
                 "card" => "CARD_NOT_FOUND",
+                "model_profile" => "MODEL_PROFILE_NOT_FOUND",
                 _ => "NOT_FOUND",
             },
             AppError::Validation { .. } => "INVALID_INPUT",
+            AppError::InvalidSettings { .. } => "INVALID_SETTINGS",
+            AppError::InvalidTimeFormat { .. } => "INVALID_TIME_FORMAT",
+            AppError::InvalidPath { .. } => "INVALID_PATH",
             AppError::InvalidReviewOperation { .. } => "INVALID_REVIEW_OPERATION",
             AppError::AiTimeout => "AI_TIMEOUT",
             AppError::AiUnavailable { .. } => "AI_UNAVAILABLE",
             AppError::AiResponseInvalid { .. } => "AI_RESPONSE_INVALID",
+            AppError::ModelConnectionFailed { .. } => "MODEL_CONNECTION_FAILED",
+            AppError::ModelAuthFailed => "MODEL_AUTH_FAILED",
         }
     }
 }
