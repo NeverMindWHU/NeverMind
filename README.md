@@ -153,6 +153,13 @@ NeverMind/
 
 该结构遵循“前端视图层 + Rust 核心层 + 本地数据层”的分层思路，同时在前端侧按业务模块拆分，在 Rust 侧按职责边界拆分，便于后续逐步扩展 AI 生成、复习调度、通知提醒和本地存储能力。
 
+### 开发文档
+
+- 前后端并行开发总方案：`docs/architecture/parallel-development-plan.md`
+- 后端双人开发分工指南：`docs/architecture/backend-two-person-guide.md`
+- 后端上手指南：`docs/architecture/backend-onboarding.md`
+- 接口契约文档目录：`docs/architecture/contracts/`
+
 ---
 
 ## 🗺 项目规划
