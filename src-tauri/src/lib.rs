@@ -11,12 +11,22 @@ use crate::{db::Database, state::AppState, utils::error::AppResult};
 async fn init_app_state(database_url: &str) -> AppResult<AppState> {
     let database = Database::connect(database_url).await?;
     database.migrate().await?;
-    Ok(AppState::from_pool(database.pool().clone()))
+    // 生产启动路径：必须成功构建豆包客户端，保证所有 IPC 调用都走真实 LLM。
+    let llm = crate::ai::require_ark_client()?;
+    Ok(AppState::from_pool_with_llm(
+        database.pool().clone(),
+        llm,
+    ))
 }
 
 pub fn run() {
     let app_state = tauri::async_runtime::block_on(init_app_state("sqlite:nevermind.db"))
-        .unwrap_or_else(|err| panic!("failed to initialize application state: {}", err));
+        .unwrap_or_else(|err| {
+            panic!(
+                "应用初始化失败: {}\n请确认 .env 中已配置 ARK_API_KEY（参考 .env.example）。",
+                err
+            )
+        });
 
     tauri::Builder::default()
         .manage(app_state)

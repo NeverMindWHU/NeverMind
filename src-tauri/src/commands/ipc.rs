@@ -1,7 +1,6 @@
 use tauri::State;
 
 use crate::{
-    ai::MockLlmClient,
     commands::{generate, review},
     models::card::{GeneratedCardBatchResult, ReviewedGeneratedCardsResult},
     state::AppState,
@@ -13,9 +12,9 @@ pub async fn generate_cards(
     state: State<'_, AppState>,
     input: generate::GenerateCardsInput,
 ) -> Result<GeneratedCardBatchResult, CommandError> {
-    let llm = MockLlmClient;
+    // 使用注入在 AppState 里的 LLM 客户端（生产启动时已绑定为真实豆包客户端）。
     generate::generate_cards(
-        &llm,
+        state.llm.as_ref(),
         state.card_dao.as_ref(),
         state.review_dao.as_ref(),
         input,
