@@ -43,18 +43,20 @@
   "sourceText": "string",
   "selectedKeyword": "string | null",
   "contextTitle": "string | null",
-  "sourceType": "manual | selection | import",
-  "modelProfileId": "string | null"
+  "sourceType": "manual | selection | import | image",
+  "modelProfileId": "string | null",
+  "imageUrls": ["string"]
 }
 ```
 
 字段说明：
 
-- `sourceText`：原始文本，最少 1 个字符，最大长度建议 5000
+- `sourceText`：原始文本，最大长度建议 5000 字符。纯图片场景下可为空字符串；但 `sourceText` 与 `imageUrls` **至少有一项非空**。
 - `selectedKeyword`：用户显式选择的关键词，可为空
 - `contextTitle`：来源标题，例如文章标题、章节名，可为空
-- `sourceType`：来源类型
+- `sourceType`：来源类型。`image` 用于标记本批次来自图片输入（也允许图文混合时仍用 `manual`/`selection`/`import`）。
 - `modelProfileId`：指定模型配置，可为空，空时使用默认模型
+- `imageUrls`：图片输入列表，可为空。每项必须以 `http://`、`https://` 或 `data:image/<mime>;base64,...` 开头；单次最多 8 张。后端会在调用多模态模型（如 doubao-seed-2.0 系列）时把图片与 `sourceText` 一起送入同一个 `user` 消息。图片 URL 本身不会持久化到 `generation_batches.source_text`，纯图片批次的 `source_text` 会写入占位符 `"[图片输入 N 张]"`。
 
 成功返回：
 

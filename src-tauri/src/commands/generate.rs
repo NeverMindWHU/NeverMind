@@ -10,7 +10,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    ai::{parser::parse_cards, prompt::build_prompt, LlmClient},
+    ai::{
+        client::{ChatRequest, ImageInput},
+        parser::parse_cards,
+        prompt::build_prompt,
+        LlmClient,
+    },
     db::dao::{card_dao::CardDao, review_dao::ReviewDao},
     models::{
         card::{
@@ -29,6 +34,8 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateCardsInput {
+    /// 原始文本。纯图片生成场景下允许为空字符串，此时必须提供 `image_urls`。
+    #[serde(default)]
     pub source_text: String,
     #[serde(default)]
     pub selected_keyword: Option<String>,
@@ -37,6 +44,10 @@ pub struct GenerateCardsInput {
     pub source_type: String,
     #[serde(default)]
     pub model_profile_id: Option<String>,
+    /// 图片输入。每项可以是 `http(s)://` URL 或 `data:image/<mime>;base64,...`
+    /// 形式的内联数据 URL。`source_text` 与 `image_urls` 至少一个非空。
+    #[serde(default)]
+    pub image_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +65,7 @@ pub struct ReviewGeneratedCardsInput {
 // ============================================================================
 
 const MAX_SOURCE_TEXT_LEN: usize = 5000;
+const MAX_IMAGE_COUNT: usize = 8;
 
 // ============================================================================
 // 业务函数
@@ -72,22 +84,41 @@ pub async fn generate_cards(
 ) -> AppResult<GeneratedCardBatchResult> {
     validate_generate_input(&input)?;
 
+    let has_images = !input.image_urls.is_empty();
     let prompt = build_prompt(
         &input.source_text,
         input.selected_keyword.as_deref(),
         input.context_title.as_deref(),
+        has_images,
     );
-    let raw_response = llm.complete(&prompt).await?;
+
+    let request = ChatRequest {
+        text: prompt,
+        images: input
+            .image_urls
+            .iter()
+            .map(|url| ImageInput::new(url.clone()))
+            .collect(),
+    };
+    let raw_response = llm.complete_chat(request).await?;
     let parsed_cards = parse_cards(&raw_response)?;
 
     let batch_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
+    // 纯图片场景下 source_text 为空，用一段人类可读描述占位写入批次；
+    // 图片 URL（尤其 base64 data URL）不持久化，避免数据库膨胀。
+    let persisted_source_text = if input.source_text.trim().is_empty() && has_images {
+        format!("[图片输入 {} 张]", input.image_urls.len())
+    } else {
+        input.source_text.clone()
+    };
+
     card_dao
         .create_generation_batch(&NewGenerationBatch {
             id: batch_id.clone(),
             source_type: input.source_type.clone(),
-            source_text: input.source_text.clone(),
+            source_text: persisted_source_text,
             selected_keyword: input.selected_keyword.clone(),
             context_title: input.context_title.clone(),
         })
@@ -211,9 +242,11 @@ pub async fn review_generated_cards(
 
 fn validate_generate_input(input: &GenerateCardsInput) -> AppResult<()> {
     let text = input.source_text.trim();
-    if text.is_empty() {
+    let has_images = !input.image_urls.is_empty();
+
+    if text.is_empty() && !has_images {
         return Err(AppError::Validation {
-            message: "sourceText 不能为空".into(),
+            message: "sourceText 与 imageUrls 至少需要提供一项".into(),
         });
     }
     if text.chars().count() > MAX_SOURCE_TEXT_LEN {
@@ -221,8 +254,36 @@ fn validate_generate_input(input: &GenerateCardsInput) -> AppResult<()> {
             message: format!("sourceText 超过 {} 字符", MAX_SOURCE_TEXT_LEN),
         });
     }
+
+    if has_images {
+        if input.image_urls.len() > MAX_IMAGE_COUNT {
+            return Err(AppError::Validation {
+                message: format!("imageUrls 最多 {} 张", MAX_IMAGE_COUNT),
+            });
+        }
+        for (idx, url) in input.image_urls.iter().enumerate() {
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                return Err(AppError::Validation {
+                    message: format!("imageUrls[{}] 不能为空", idx),
+                });
+            }
+            let ok = trimmed.starts_with("http://")
+                || trimmed.starts_with("https://")
+                || trimmed.starts_with("data:image/");
+            if !ok {
+                return Err(AppError::Validation {
+                    message: format!(
+                        "imageUrls[{}] 必须以 http(s):// 或 data:image/ 开头",
+                        idx
+                    ),
+                });
+            }
+        }
+    }
+
     match input.source_type.as_str() {
-        "manual" | "selection" | "import" => Ok(()),
+        "manual" | "selection" | "import" | "image" => Ok(()),
         other => Err(AppError::Validation {
             message: format!("sourceType 非法: {}", other),
         }),
@@ -272,6 +333,7 @@ mod tests {
             context_title: None,
             source_type: "manual".into(),
             model_profile_id: None,
+            image_urls: Vec::new(),
         }
     }
 
@@ -362,5 +424,123 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(err.code(), "INVALID_REVIEW_OPERATION");
+    }
+
+    #[test]
+    fn validate_generate_input_rejects_empty_text_and_no_images() {
+        let mut input = sample_input();
+        input.source_text = "   ".into();
+        input.image_urls = vec![];
+        let err = validate_generate_input(&input).unwrap_err();
+        assert_eq!(err.code(), "INVALID_INPUT");
+    }
+
+    #[test]
+    fn validate_generate_input_accepts_image_only() {
+        let mut input = sample_input();
+        input.source_text = String::new();
+        input.source_type = "image".into();
+        input.image_urls = vec!["https://example.com/a.png".into()];
+        validate_generate_input(&input).unwrap();
+    }
+
+    #[test]
+    fn validate_generate_input_rejects_bad_image_scheme() {
+        let mut input = sample_input();
+        input.image_urls = vec!["ftp://example.com/a.png".into()];
+        let err = validate_generate_input(&input).unwrap_err();
+        assert_eq!(err.code(), "INVALID_INPUT");
+    }
+
+    #[test]
+    fn validate_generate_input_accepts_data_url() {
+        let mut input = sample_input();
+        input.source_text = String::new();
+        input.image_urls = vec!["data:image/png;base64,AAAA".into()];
+        validate_generate_input(&input).unwrap();
+    }
+
+    // ---- 透传：自定义 LLM 验证 image_urls 到了 complete_chat ----
+
+    use std::sync::Mutex;
+
+    struct CapturingLlm {
+        last: Mutex<Option<ChatRequest>>,
+        response: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmClient for CapturingLlm {
+        async fn complete(&self, prompt: &str) -> AppResult<String> {
+            *self.last.lock().unwrap() = Some(ChatRequest::from_text(prompt));
+            Ok(self.response.clone())
+        }
+        async fn complete_chat(&self, request: ChatRequest) -> AppResult<String> {
+            *self.last.lock().unwrap() = Some(request);
+            Ok(self.response.clone())
+        }
+    }
+
+    fn mock_response() -> String {
+        r#"{"cards":[{"keyword":"遗忘曲线","definition":"d","explanation":"e","relatedTerms":[],"scenarios":[],"sourceExcerpt":""}]}"#.to_string()
+    }
+
+    #[tokio::test]
+    async fn generate_cards_forwards_images_to_llm() {
+        let (_db, card_dao, review_dao) = setup().await;
+        let llm = CapturingLlm {
+            last: Mutex::new(None),
+            response: mock_response(),
+        };
+
+        let input = GenerateCardsInput {
+            source_text: String::new(),
+            selected_keyword: None,
+            context_title: Some("Ebbinghaus Forgetting Curve".into()),
+            source_type: "image".into(),
+            model_profile_id: None,
+            image_urls: vec![
+                "https://example.com/a.png".into(),
+                "data:image/png;base64,AAAA".into(),
+            ],
+        };
+        generate_cards(&llm, &card_dao, &review_dao, input).await.unwrap();
+
+        let captured = llm.last.lock().unwrap().clone().expect("llm 未被调用");
+        assert_eq!(captured.images.len(), 2, "两张图片都必须透传给 LLM");
+        assert_eq!(captured.images[0].url, "https://example.com/a.png");
+        assert!(captured.images[1].url.starts_with("data:image/png;base64,"));
+        assert!(captured.text.contains("随附图片"), "prompt 应提示模型看图");
+    }
+
+    #[tokio::test]
+    async fn generate_cards_persists_placeholder_source_text_for_image_only() {
+        let (db, card_dao, review_dao) = setup().await;
+        let llm = CapturingLlm {
+            last: Mutex::new(None),
+            response: mock_response(),
+        };
+        let input = GenerateCardsInput {
+            source_text: String::new(),
+            selected_keyword: None,
+            context_title: None,
+            source_type: "image".into(),
+            model_profile_id: None,
+            image_urls: vec!["https://example.com/x.png".into()],
+        };
+        let out = generate_cards(&llm, &card_dao, &review_dao, input).await.unwrap();
+
+        let (source_text, source_type): (String, String) = sqlx::query_as(
+            "SELECT source_text, source_type FROM generation_batches WHERE id = ?",
+        )
+        .bind(&out.batch_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(source_type, "image");
+        assert!(
+            source_text.starts_with("[图片输入"),
+            "纯图片批次应写入占位符而不是空串，实际: {source_text}"
+        );
     }
 }
