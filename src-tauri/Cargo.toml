@@ -1,23 +1,30 @@
 [package]
 name = "nevermind-tauri"
 version = "0.1.0"
+description = "NeverMind desktop —日程采集（SchedulePCagent）+ 间隔复习"
 edition = "2021"
 
+[lib]
+name = "nevermind_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
-tauri-build = { version = "=2.0.0" }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-dotenvy = "0.15"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-global-shortcut = "2"
+tauri-utils = { version = "2" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "=0.7.4", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate", "chrono", "uuid"] }
-tauri = { version = "=2.0.0" }
-tauri-utils = { version = "=2.0.0" }
+chrono = { version = "0.4", features = ["serde"] }
+harness-core = { path = "../crates/harness-core" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dotenvy = "0.15"
+async-trait = "0.1"
+sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate", "chrono", "uuid"] }
 thiserror = "2"
-time = "=0.3.36"
+time = "0.3.36"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-url = "=2.4.1"
+url = "2.4.1"
 uuid = { version = "1", features = ["serde", "v4"] }

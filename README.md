@@ -1,201 +1,91 @@
-# NeverMind
+# 光合日历 · 桌面 Agent（SchedulePCagent）
 
-> AI 驱动的知识卡片生成与艾宾浩斯记忆复习管理工具
+本目录包含：**产品文档** + **桌面观察运行时（Rust + Tauri + React）** 初版实现。桌面窗口产品名为 **「光合桌面观察」**（调试壳，非最终商品名）。
 
-## 📖 项目简介
+## 文档索引
 
-NeverMind 是一款基于 Tauri 框架开发的桌面端知识管理与记忆辅助应用。本项目致力于弥合“笔记记录”与“科学记忆”之间的工具鸿沟，通过大语言模型（LLM）的语义理解能力与艾宾浩斯遗忘曲线算法的结合，为用户提供从**内容提取、卡片生成、智能排期到集中复习**的完整学习闭环。
+| 文档 | 说明 |
+|------|------|
+| [**docs/运行教程.md**](./docs/运行教程.md) | **从零启动：目录、命令、方舟 Key、常见报错（ENOENT / cargo / exe 占用 / 白屏）** |
+| [docs/MVPv1.md](./docs/MVPv1.md) | 个人桌面 harness：观察层 / 时间线 / CLI 调试 / 节奏引擎路线 |
+| [docs/PRDv1.md](./docs/PRDv1.md) | 产品方向与分阶段路线 |
+| [docs/flutter_to_desktop_product_analysis.md](./docs/flutter_to_desktop_product_analysis.md) | 与 Flutter 主应用的关系 |
+| [docs/数据与运行说明.md](./docs/数据与运行说明.md) | **数据路径、字段设计、白屏排查、WebView 与停录是否丢数据** |
+| [docs/气泡球调参.md](./docs/气泡球调参.md) | **气泡窗口宽高、阴影、object-fit、右键菜单等调参入口** |
 
-项目遵循本地优先（Local-First）设计原则，核心数据存储于本地，依托 Tauri 的高性能与低资源占用特性，打造轻量、安全、高效的学习工具。
+### 火山方舟 AI 分析（豆包）
 
----
+1. 在 `SchedulePCagent` 下复制 [`.env.example`](./.env.example) 为 **`.env`**，填写 `ARK_API_KEY`（**不要**把 `.env` 提交到 Git）。
+2. 启动 `npm run tauri:dev`，点击 **「AI 分析今日」**：会把今日事件 JSON + 近 15 分钟统计发给方舟，模型默认 `doubao-seed-2-0-lite-260215`，可用 `ARK_MODEL` / `ARK_API_BASE` 覆盖。
+3. 若曾在聊天/截图里泄露过 Key，请到火山引擎控制台 **轮换密钥**。
 
-## ✨ 核心特性
+### 桌面气泡球（光合日历）
 
-| 特性模块 | 功能说明 |
-|:---|:---|
-| **🤖 智能卡片生成** | 划选任意文本/关键词，调用 AI 自动生成结构化知识卡片（含定义、通俗解释、关联词、应用场景、记忆口诀） |
-| **📅 艾宾浩斯复习引擎** | 内置标准遗忘曲线算法（复习节点：1、1、3、7、15、30天），自动计算最佳复习时机并推送桌面通知 |
-| **🗄️ 知识宝库** | 集中管理所有卡片，支持关键词检索、分类浏览、正反面记忆模式、批量编辑与状态标记 |
-| **🔒 本地隐私优先** | 基于 SQLite 本地数据库存储，支持数据导出/导入；无默认云端上传，全面保障知识资产安全 |
-| **🖥️ 跨平台桌面端** | 依托 Tauri 构建，支持 Windows / macOS / Linux；提供深色/浅色主题与自适应布局 |
+- `npm run tauri:dev` 后会同时打开主窗口与 **`bubble`** 小窗：无边框、透明背景、置顶、不占任务栏（见 `src-tauri/tauri.conf.json`）。
+- 调节大小、阴影、图片裁切、右键菜单：见 **[docs/气泡球调参.md](./docs/气泡球调参.md)** 与 **`src/BubbleBall.tsx` 顶部注释**。
+- 背景图为仓库内 [`images/光合日历气泡球背景.png`](./images/光合日历气泡球背景.png)。在球体区域 **按住拖动** 可移动窗口；**双击** 打开主窗口；**右键** 弹出功能菜单（打开主界面 / 隐藏气泡球，菜单通过 Portal 画在窗口内、不压在球体上）。隐藏后主窗口点 **「显示气泡球」** 可再次显示。
 
----
+## 工程结构
 
-## 🛠 技术栈
+| 路径 | 说明 |
+|------|------|
+| `crates/harness-core` | `DesktopEvent`（app_switch + clipboard）、`RecordingState` 轮询、`TimelineStore`（含 WAL）、`WindowStats` 时间窗统计 |
+| `crates/harness-cli` | 调试 CLI，二进制名 **`harness`** |
+| `src-tauri/` | Tauri 2：`invoke` 时间线 / 前台 / **后台记录** / `analyze_window_minutes` |
+| `src/` | React + TypeScript + Tailwind（已预留，后续可 `shadcn init`） |
+| `data/` | 默认 SQLite 目录（`harness.db*`），随仓库在 D 盘；见 [`data/README.md`](./data/README.md) |
 
-| 层级 | 技术选型 |
-|:---|:---|
-| **桌面框架** | Tauri v2 (Rust 后端 + 前端 Web 视图) |
-| **数据存储** | SQLite (本地关系型数据库) |
-| **AI 服务** | 兼容 Qwen 等大语言模型 API（支持本地/云端模型接入） |
-| **前端框架** | 现代化 Web 技术栈（React / Vue / Svelte 可插拔） |
-| **通知系统** | Tauri Native Notification API + 系统托盘集成 |
-| **构建工具** | Node.js + Cargo + `tauri-cli` |
+## 前置条件
 
----
+- **Rust**（`rustc` / `cargo`）— 本仓库作者环境为 **装在 D 盘**，避免占满 C 盘：
+  - 用户变量：`RUSTUP_HOME` = `D:\Rust\rustup`，`CARGO_HOME` = `D:\Rust\cargo`
+  - `Path` 前置：`D:\Rust\cargo\bin`
+  - 一键脚本（新机器或重装）：以 PowerShell 执行 [`scripts/install-rust-d-drive.ps1`](./scripts/install-rust-d-drive.ps1)（需已装 **Visual Studio Build Tools / MSVC** 以使用 `x86_64-pc-windows-msvc`）
+  - 设置后请 **新开终端**，或重启 Cursor，再运行 `cargo` / `npm run tauri:dev`
+  - 若终端仍找不到 `cargo`：运行 **`npm run tauri:dev`**（或 `npm run tauri -- dev`），会通过 [`scripts/run-with-rust-env.mjs`](./scripts/run-with-rust-env.mjs) 把 `D:\Rust\cargo\bin` 加入本次进程 `PATH`；也可在 PowerShell 临时执行：`$env:Path = 'D:\Rust\cargo\bin;' + $env:Path`
+- Node.js 18+、npm
 
-## 🚀 快速开始
+## 开发命令
 
-### 环境准备
-- **Node.js** `>= 18.0.0`
-- **Rust** `>= 1.75.0` (推荐通过 `rustup` 安装)
-- 系统依赖：参见 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/)
-
-### 安装与运行
 ```bash
-# 1. 克隆项目
-git clone https://github.com/your-org/nevermind.git
-cd nevermind
-
-# 2. 安装前端依赖
+cd SchedulePCagent
 npm install
-
-# 3. 启动开发环境 (同时启动 Rust 后端与前端 HMR)
-npm run tauri dev
-
-# 4. 构建生产版本
-npm run tauri build
-```
-构建产物将输出至 `src-tauri/target/release/bundle/` 目录下，包含对应操作系统的安装包。
-
----
-
-## 📖 使用指南
-
-### 1. 生成知识卡片
-1. 在系统任意支持文本选择的界面（浏览器、PDF 阅读器、本地文档等）选中目标关键词。
-2. 通过 NeverMind 全局快捷键或系统托盘右键菜单触发 `生成知识卡片`。
-3. AI 将在 3 秒内返回结构化卡片内容，支持用户二次编辑后确认保存。
-
-### 2. 科学复习
-- 系统后台定时扫描到期卡片，通过原生通知推送复习提醒。
-- 点击通知打开复习视图：先展示关键词（正面），点击后展开完整内容（背面）。
-- 用户可选择 `记住了` / `未记住` / `跳过`，系统据此动态调整下次复习节点。
-
-### 3. 知识宝库管理
-- 进入 `知识宝库` 模块，支持按首字母、分类或标签浏览。
-- 顶部搜索框支持实时模糊匹配，毫秒级响应。
-- 支持卡片批量导出（JSON/CSV）、导入及本地备份。
-
----
-
-## 🏗 架构设计
-
-```
-┌─────────────────────────────────────────────┐
-│                 前端视图层                  │
-│  (卡片生成 / 复习界面 / 宝库管理 / 设置)      │
-└───────────────────┬─────────────────────────┘
-                    │ IPC 通信 (Tauri Commands)
-┌───────────────────▼─────────────────────────┐
-│               Rust 核心层                   │
-│  • AI 请求调度与重试机制                    │
-│  • 艾宾浩斯排期算法引擎                     │
-│  • SQLite 数据访问层 (DAO)                  │
-│  • 系统通知与托盘管理                       │
-└───────────────────┬─────────────────────────┘
-                    │ 本地持久化
-┌───────────────────▼─────────────────────────┐
-│              SQLite 数据库                  │
-│  • 知识卡片表 (cards)                       │
-│  • 复习计划表 (review_schedule)             │
-│  • 用户配置表 (settings)                    │
-└─────────────────────────────────────────────┘
 ```
 
-### 目录结构说明
+### 调试 CLI（显微镜）
 
-```text
-NeverMind/
-├── README.md
-├── .gitignore
-├── docs/
-│   ├── architecture/     # 架构设计文档
-│   └── product/          # 产品说明与需求文档
-├── scripts/
-│   ├── release/          # 发布脚本
-│   └── setup/            # 环境初始化脚本
-├── src/                  # 前端应用层
-│   ├── app/              # 应用入口与路由装配
-│   ├── assets/           # 静态资源
-│   ├── components/       # 通用组件
-│   ├── features/         # 按业务模块拆分
-│   │   ├── card-generation/  # 知识卡片生成
-│   │   ├── library/          # 知识宝库管理
-│   │   ├── review/           # 复习流程
-│   │   └── settings/         # 应用设置
-│   ├── layouts/          # 页面布局
-│   ├── lib/              # 工具函数与基础能力封装
-│   ├── pages/            # 页面级视图
-│   ├── store/            # 全局状态管理
-│   ├── styles/           # 全局样式
-│   └── types/            # 类型定义
-├── src-tauri/            # Tauri / Rust 核心层
-│   ├── capabilities/     # Tauri 能力声明
-│   ├── icons/            # 应用图标资源
-│   ├── migrations/       # SQLite 数据迁移脚本
-│   └── src/
-│       ├── ai/           # AI 请求调度与模型接入
-│       ├── commands/     # Tauri IPC 命令入口
-│       ├── db/dao/       # 数据访问层
-│       ├── models/       # 核心数据模型
-│       ├── notifications/# 系统通知
-│       ├── scheduler/    # 艾宾浩斯复习排期引擎
-│       ├── state/        # 全局运行时状态
-│       ├── tray/         # 系统托盘相关逻辑
-│       └── utils/        # Rust 工具函数
-└── tests/
-    ├── e2e/              # 端到端测试
-    ├── fixtures/         # 测试数据
-    └── integration/      # 集成测试
+```bash
+cargo run -p harness-cli -- observe status
+cargo run -p harness-cli -- observe run --interval-secs 2
+cargo run -p harness-cli -- timeline today
+cargo run -p harness-cli -- timeline today --json
+cargo run -p harness-cli -- analyze window --minutes 15
+cargo run -p harness-cli -- analyze window --minutes 30 --json
 ```
 
-该结构遵循“前端视图层 + Rust 核心层 + 本地数据层”的分层思路，同时在前端侧按业务模块拆分，在 Rust 侧按职责边界拆分，便于后续逐步扩展 AI 生成、复习调度、通知提醒和本地存储能力。
+数据库默认：**本仓库 `data/harness.db`**（`npm run tauri:*` 会设 `GUANGHE_DATA_DIR`）；在仓库根执行 `cargo run -p harness-cli` 时也会用 `./data/`。可用 `--db` 或 `HARNESS_DB_PATH` / `GUANGHE_DATA_DIR` 覆盖。详见 [数据与运行说明](./docs/数据与运行说明.md)。**导出 JSON 给 AI**：`npm run export:timeline-today` → `data/export/timeline-today-*.json`。
 
-### 开发文档
+### 桌面壳（Tauri + Vite）
 
-- 前后端并行开发总方案：`docs/architecture/parallel-development-plan.md`
-- 后端双人开发分工指南：`docs/architecture/backend-two-person-guide.md`
-- 后端上手指南：`docs/architecture/backend-onboarding.md`
-- 接口契约文档目录：`docs/architecture/contracts/`
+```bash
+npm run tauri:dev
+```
 
----
+生产构建：
 
-## 🗺 项目规划
+```bash
+npm run tauri:build
+```
 
-| 版本 | 里程碑 | 预期交付 |
-|:---|:---|:---|
-| **V1.0** | 核心功能闭环 | 卡片生成、艾宾浩斯复习、知识宝库、本地存储 |
-| **V1.1** | 生态扩展 | 支持自定义 AI 模型端点、数据导入导出、复习数据可视化 |
-| **V1.2** | 协作与同步 | 可选端到端加密云同步、多设备状态一致性 |
-| **V2.0** | 移动端延伸 | 基于 Tauri Mobile 开发 iOS/Android 伴侣应用 |
+（`tauri.conf.json` 里 `bundle.active` 当前为 `false`，便于无图标先跑通；发布前再打开并配置 `icons`。）
 
----
+## 已实现（阶段 A）
 
-## 🤝 贡献指南
+- 剪贴板文本变化写入 `clipboard` 事件（预览截断、记录总字符数）
+- SQLite `WAL`，便于 Tauri 后台写线程与界面读连接并存
+- Tauri 内 **开始记录 / 停止记录**（2s 轮询，与 CLI 共用 `RecordingState`）
+- `analyze window` / `analyze_window_minutes`：近 N 分钟 app_switch 次数、clipboard 次数、主导应用 Top10
 
-本项目欢迎符合规范的代码提交与文档优化。提交 Pull Request 前，请确保：
-1. 遵循 `rustfmt` 与 `prettier` 代码规范。
-2. 新增功能需包含单元测试与集成测试。
-3. 提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+## 下一步（阶段 B+）
 
-详细开发规范请参阅 `CONTRIBUTING.md`。
-
----
-
-## 📄 许可证
-
-本项目采用 **MIT License** 授权。详见 [LICENSE](./LICENSE) 文件。
-
----
-
-## 📮 反馈与支持
-
-- 🐛 问题反馈：[GitHub Issues](https://github.com/your-org/nevermind/issues)
-- 💡 功能建议：[GitHub Discussions](https://github.com/your-org/nevermind/discussions)
-- 📧 商务合作：`contact@nevermind.app`
-
----
-
-> 本文档版本：V1.0 ｜ 最后更新：2026-04-18 ｜ 维护团队：NeverMind Core Team
+- 浏览器上下文、Rhythm Engine v0、`shadcn/ui`、托盘与全局快捷键、对接 `schedule_backend` AI

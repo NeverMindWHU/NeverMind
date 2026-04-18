@@ -4,25 +4,42 @@
   "version": "0.1.0",
   "identifier": "app.nevermind.desktop",
   "build": {
-    "frontendDist": "../src",
-    "devUrl": "http://localhost:1420"
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "NeverMind",
-        "width": 1200,
-        "height": 800,
+        "width": 1180,
+        "height": 720,
         "resizable": true
+      },
+      {
+        "label": "bubble",
+        "title": "NeverMind 气泡",
+        "width": 380,
+        "height": 440,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": ["default"]
     }
   },
   "bundle": {
     "active": false,
+    "targets": "all",
     "icon": []
   }
 }
