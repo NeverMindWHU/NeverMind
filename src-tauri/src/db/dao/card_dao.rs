@@ -50,6 +50,13 @@ pub trait CardDao: Send + Sync {
     /// 以关键词为一级维度聚合当前"可见"的卡片，跨批次。
     /// 老数据（`keywords` 为空）会以其主关键词 `keyword` 作为桶 key 兜底。
     async fn list_keyword_buckets(&self, only_accepted: bool) -> AppResult<Vec<KeywordBucket>>;
+
+    /// 一键清库：删除所有 `cards` 与 `generation_batches`。
+    /// 返回 (删除的卡片数, 删除的批次数)。
+    ///
+    /// **注意**：复习相关表（`review_schedule` / `review_logs`）由
+    /// `ReviewDao::clear_all` 负责清理，调用方需按顺序先清子表再清这里。
+    async fn clear_all(&self) -> AppResult<(i64, i64)>;
 }
 
 #[derive(Clone)]
@@ -401,6 +408,23 @@ impl CardDao for SqliteCardDao {
         });
         Ok(buckets)
     }
+
+    async fn clear_all(&self) -> AppResult<(i64, i64)> {
+        // 事务内顺序清 cards → generation_batches；
+        // 即便 FK 未开启也走"子表 → 父表"顺序更稳妥。复习相关表由
+        // ReviewDao::clear_all 负责，调用方需先清 review_* 再调本方法。
+        let mut tx = self.pool.begin().await?;
+        let cards = sqlx::query("DELETE FROM cards")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected() as i64;
+        let batches = sqlx::query("DELETE FROM generation_batches")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected() as i64;
+        tx.commit().await?;
+        Ok((cards, batches))
+    }
 }
 
 /// 一个小工具，对外只把 `keywords` JSON 列 parse 出来，供上层 in-memory 过滤使用。
@@ -552,6 +576,27 @@ mod tests {
         seed(&dao).await;
         let buckets = dao.list_keyword_buckets(true).await.unwrap();
         assert!(!buckets.iter().any(|b| b.keyword == "动态规划"));
+    }
+
+    /// `clear_all` 清空 cards + generation_batches，返回实际删除数。
+    /// 二次调用应返回 (0, 0)。
+    #[tokio::test]
+    async fn clear_all_empties_cards_and_batches() {
+        let dao = setup().await;
+        seed(&dao).await;
+
+        let (deleted_cards, deleted_batches) = dao.clear_all().await.unwrap();
+        assert_eq!(deleted_cards, 4);
+        assert_eq!(deleted_batches, 1);
+
+        let buckets = dao.list_keyword_buckets(false).await.unwrap();
+        assert!(buckets.is_empty());
+        let hits = dao.search_cards_by_keyword("闭包", false).await.unwrap();
+        assert!(hits.is_empty());
+
+        // 幂等：清空后再调一次应返回 0。
+        let again = dao.clear_all().await.unwrap();
+        assert_eq!(again, (0, 0));
     }
 
     #[test]

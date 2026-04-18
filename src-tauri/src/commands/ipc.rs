@@ -129,6 +129,15 @@ pub async fn test_model_profile(
         .map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub async fn clear_library(
+    state: State<'_, AppState>,
+) -> Result<settings::CommandResponse<settings::ClearLibraryData>, CommandError> {
+    settings::clear_library(state.inner())
+        .await
+        .map_err(CommandError::from)
+}
+
 // ---- 宝库（Library）-------------------------------------------------------
 
 #[tauri::command]

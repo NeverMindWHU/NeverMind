@@ -1,6 +1,7 @@
 import { invokeData } from "@/lib/tauri";
 import type {
   AppSettingsData,
+  ClearLibraryData,
   ListModelProfilesData,
   SaveModelProfileData,
   SaveModelProfileInput,
@@ -28,4 +29,12 @@ export function saveModelProfile(input: SaveModelProfileInput) {
 
 export function testModelProfile(input: TestModelProfileInput) {
   return invokeData<TestModelProfileData>("test_model_profile", { input });
+}
+
+/**
+ * 一键清库：清除所有卡片、批次、复习排程与复习日志。
+ * 设置与模型配置不会被清掉。该操作不可撤销。
+ */
+export function clearLibrary() {
+  return invokeData<ClearLibraryData>("clear_library");
 }

@@ -43,7 +43,7 @@ export function HomePage() {
       <header>
         <h1 className="text-2xl font-semibold text-ink-900">欢迎回到 NeverMind</h1>
         <p className="mt-1 text-sm text-ink-500">
-          把看到的知识变成卡片，再用艾宾浩斯节奏巩固。
+          把看到的知识变成卡片
         </p>
       </header>
 

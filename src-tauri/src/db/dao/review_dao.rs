@@ -33,6 +33,10 @@ pub trait ReviewDao: Send + Sync {
     ) -> AppResult<i64>;
     async fn get_next_due_at(&self) -> AppResult<Option<DateTime<Utc>>>;
     async fn list_completed_review_days_desc(&self, limit: i64) -> AppResult<Vec<String>>;
+
+    /// 一键清库配套：删除所有 `review_logs` 与 `review_schedule`。
+    /// 返回 (删除的日志数, 删除的排程数)。
+    async fn clear_all(&self) -> AppResult<(i64, i64)>;
 }
 
 #[derive(Clone)]
@@ -295,5 +299,20 @@ impl ReviewDao for SqliteReviewDao {
         .await?;
 
         Ok(days)
+    }
+
+    async fn clear_all(&self) -> AppResult<(i64, i64)> {
+        // 事务内先清 review_logs（其外键引用 review_schedule / cards），再清 review_schedule。
+        let mut tx = self.pool.begin().await?;
+        let logs = sqlx::query("DELETE FROM review_logs")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected() as i64;
+        let schedules = sqlx::query("DELETE FROM review_schedule")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected() as i64;
+        tx.commit().await?;
+        Ok((logs, schedules))
     }
 }

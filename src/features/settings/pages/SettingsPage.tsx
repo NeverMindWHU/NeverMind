@@ -1,4 +1,5 @@
 import { Spinner } from "@/components/Spinner";
+import { DangerZonePanel } from "../components/DangerZonePanel";
 import { GeneralSettingsForm } from "../components/GeneralSettingsForm";
 import { ModelProfilesPanel } from "../components/ModelProfilesPanel";
 import { useSettings } from "../hooks/useSettings";
@@ -31,6 +32,7 @@ export function SettingsPage() {
             onSave={s.saveProfile}
             onTest={s.testProfile}
           />
+          <DangerZonePanel clearing={s.clearing} onClear={s.clearLibrary} />
         </>
       )}
     </div>

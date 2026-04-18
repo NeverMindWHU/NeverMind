@@ -121,6 +121,31 @@ pub struct TestModelProfileData {
 const DEFAULT_THEME: &str = "system";
 const DEFAULT_LANGUAGE: &str = "zh-CN";
 const DEFAULT_REVIEW_REMINDER_TIME: &str = "09:00";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearLibraryData {
+    pub deleted_cards: i64,
+    pub deleted_batches: i64,
+    pub deleted_review_schedules: i64,
+    pub deleted_review_logs: i64,
+}
+
+/// 一键清库：清掉所有卡片、批次、复习排程与复习日志。
+/// **不**动设置（settings）与模型配置（model_profiles）。
+///
+/// 删除顺序：先子表 `review_logs` → `review_schedule`，再父表 `cards` → `generation_batches`。
+pub async fn clear_library(state: &AppState) -> AppResult<CommandResponse<ClearLibraryData>> {
+    let (deleted_review_logs, deleted_review_schedules) = state.review_dao.clear_all().await?;
+    let (deleted_cards, deleted_batches) = state.card_dao.clear_all().await?;
+    Ok(CommandResponse::ok(ClearLibraryData {
+        deleted_cards,
+        deleted_batches,
+        deleted_review_schedules,
+        deleted_review_logs,
+    }))
+}
+
 pub async fn get_settings(state: &AppState) -> AppResult<CommandResponse<AppSettingsData>> {
     let data = state
         .settings_dao
@@ -463,10 +488,14 @@ mod tests {
     use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
 
     use super::{
-        get_settings, save_model_profile, update_settings, validate_review_reminder_time,
-        SaveModelProfileInput, StorageSettingsData, UpdateSettingsInput,
+        clear_library, get_settings, save_model_profile, update_settings,
+        validate_review_reminder_time, SaveModelProfileInput, StorageSettingsData,
+        UpdateSettingsInput,
     };
+    use crate::models::card::{NewCard, NewGenerationBatch};
+    use crate::models::review::NewReviewSchedule;
     use crate::state::AppState;
+    use chrono::Utc;
 
     static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -544,6 +573,105 @@ mod tests {
         assert_eq!(profiles.len(), 1);
         assert!(profiles[0].is_default);
         assert_eq!(profiles[0].api_key_secret_ref.as_deref(), Some("secret"));
+    }
+
+    /// 清库后 cards / batches / review_schedule / review_logs 全部归零，
+    /// 同时 settings 与 model_profiles 保持不变。
+    #[tokio::test]
+    async fn clear_library_wipes_cards_and_reviews_but_keeps_settings() {
+        let state = setup_test_state().await;
+
+        state
+            .card_dao
+            .create_generation_batch(&NewGenerationBatch {
+                id: "b-clear".into(),
+                source_type: "manual".into(),
+                source_text: "".into(),
+                selected_keyword: None,
+                context_title: None,
+            })
+            .await
+            .unwrap();
+        state
+            .card_dao
+            .insert_cards(&[NewCard {
+                id: "card-clear".into(),
+                batch_id: Some("b-clear".into()),
+                keyword: "清库".into(),
+                question: "清库是什么？".into(),
+                keywords: vec!["清库".into()],
+                definition: "d".into(),
+                explanation: "e".into(),
+                source_excerpt: None,
+                status: "accepted".into(),
+                next_review_at: Some(Utc::now()),
+            }])
+            .await
+            .unwrap();
+        state
+            .review_dao
+            .create_schedule(&NewReviewSchedule {
+                id: "rs-clear".into(),
+                card_id: "card-clear".into(),
+                review_step: 1,
+                due_at: Utc::now(),
+                status: "pending".into(),
+            })
+            .await
+            .unwrap();
+
+        // 顺带保存一个 settings / model_profile，验证它们不会被清掉。
+        update_settings(
+            &state,
+            UpdateSettingsInput {
+                theme: "dark".into(),
+                language: "zh-CN".into(),
+                notification_enabled: true,
+                review_reminder_enabled: true,
+                review_reminder_time: "08:00".into(),
+                storage: StorageSettingsData {
+                    export_directory: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        save_model_profile(
+            &state,
+            SaveModelProfileInput {
+                profile_id: None,
+                name: "keep-me".into(),
+                provider: "qwen".into(),
+                endpoint: "https://api.example.com".into(),
+                api_key: "secret".into(),
+                model: None,
+                timeout_ms: 30_000,
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = clear_library(&state).await.unwrap();
+        assert!(response.success);
+        assert_eq!(response.data.deleted_cards, 1);
+        assert_eq!(response.data.deleted_batches, 1);
+        assert_eq!(response.data.deleted_review_schedules, 1);
+        // 该测试没有预先插入 review_logs，所以应为 0。
+        assert_eq!(response.data.deleted_review_logs, 0);
+
+        // 再次调用应幂等归零。
+        let again = clear_library(&state).await.unwrap();
+        assert_eq!(again.data.deleted_cards, 0);
+        assert_eq!(again.data.deleted_batches, 0);
+        assert_eq!(again.data.deleted_review_schedules, 0);
+        assert_eq!(again.data.deleted_review_logs, 0);
+
+        // settings / model_profiles 必须还在。
+        let settings = state.settings_dao.get_settings().await.unwrap().unwrap();
+        assert_eq!(settings.theme, "dark");
+        let profiles = state.settings_dao.list_model_profiles().await.unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].name, "keep-me");
     }
 
     #[test]

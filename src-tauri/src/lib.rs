@@ -43,6 +43,7 @@ pub fn run() {
             commands::ipc::list_model_profiles,
             commands::ipc::save_model_profile,
             commands::ipc::test_model_profile,
+            commands::ipc::clear_library,
             commands::ipc::library_search_by_keyword,
             commands::ipc::library_search_by_question,
             commands::ipc::library_list_keyword_buckets,

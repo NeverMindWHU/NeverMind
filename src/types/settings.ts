@@ -76,3 +76,11 @@ export interface TestModelProfileData {
   reachable: boolean;
   latencyMs: number;
 }
+
+/** 一键清库返回：各表实际删除的行数。 */
+export interface ClearLibraryData {
+  deletedCards: number;
+  deletedBatches: number;
+  deletedReviewSchedules: number;
+  deletedReviewLogs: number;
+}

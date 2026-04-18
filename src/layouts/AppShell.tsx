@@ -21,7 +21,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "首页", icon: BookOpen, description: "今日任务概览" },
   { to: "/generate", label: "生成卡片", icon: Sparkles, description: "从文本/图片提炼卡片" },
-  { to: "/review", label: "复习", icon: Brain, description: "艾宾浩斯翻卡" },
+  { to: "/review", label: "复习", icon: Brain, description: "复习你的卡片" },
   { to: "/library", label: "知识宝库", icon: LibraryBig, description: "批次与卡片检索" },
   { to: "/settings", label: "设置", icon: SettingsIcon, description: "模型与通用偏好" },
 ];
