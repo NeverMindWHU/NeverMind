@@ -2,6 +2,26 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewResult {
+    Done,
+    Remembered,
+    Forgotten,
+    Skipped,
+}
+
+impl ReviewResult {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Remembered => "remembered",
+            Self::Forgotten => "forgotten",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ReviewSchedule {
     pub id: String,

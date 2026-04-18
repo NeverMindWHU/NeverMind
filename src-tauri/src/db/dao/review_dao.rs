@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -11,6 +11,7 @@ use crate::{
 pub trait ReviewDao: Send + Sync {
     async fn create_schedule(&self, schedule: &NewReviewSchedule) -> AppResult<()>;
     async fn list_due_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>>;
+    async fn count_due_reviews(&self) -> AppResult<i64>;
     async fn get_schedule(&self, review_id: &str) -> AppResult<ReviewSchedule>;
     async fn update_schedule_after_review(
         &self,
@@ -20,6 +21,13 @@ pub trait ReviewDao: Send + Sync {
         status: &str,
     ) -> AppResult<()>;
     async fn insert_review_log(&self, log: &NewReviewLog) -> AppResult<ReviewLog>;
+    async fn count_completed_reviews_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> AppResult<i64>;
+    async fn get_next_due_at(&self) -> AppResult<Option<DateTime<Utc>>>;
+    async fn list_completed_review_days_desc(&self, limit: i64) -> AppResult<Vec<String>>;
 }
 
 #[derive(Clone)]
@@ -80,6 +88,24 @@ impl ReviewDao for SqliteReviewDao {
         .await?;
 
         Ok(items)
+    }
+
+    async fn count_due_reviews(&self) -> AppResult<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM review_schedule rs
+            INNER JOIN cards c ON c.id = rs.card_id
+            WHERE rs.status = 'pending'
+              AND c.status = 'accepted'
+              AND rs.due_at <= ?
+            "#,
+        )
+        .bind(Utc::now())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
     }
 
     async fn get_schedule(&self, review_id: &str) -> AppResult<ReviewSchedule> {
@@ -155,5 +181,58 @@ impl ReviewDao for SqliteReviewDao {
         .await?;
 
         Ok(saved)
+    }
+
+    async fn count_completed_reviews_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> AppResult<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM review_logs
+            WHERE reviewed_at >= ?
+              AND reviewed_at < ?
+            "#,
+        )
+        .bind(start)
+        .bind(end)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    async fn get_next_due_at(&self) -> AppResult<Option<DateTime<Utc>>> {
+        let next_due_at = sqlx::query_scalar::<_, DateTime<Utc>>(
+            r#"
+            SELECT MIN(rs.due_at)
+            FROM review_schedule rs
+            INNER JOIN cards c ON c.id = rs.card_id
+            WHERE rs.status = 'pending'
+              AND c.status = 'accepted'
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(next_due_at)
+    }
+
+    async fn list_completed_review_days_desc(&self, limit: i64) -> AppResult<Vec<String>> {
+        let days = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT DISTINCT substr(reviewed_at, 1, 10) AS review_day
+            FROM review_logs
+            ORDER BY review_day DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(days)
     }
 }
