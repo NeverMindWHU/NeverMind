@@ -106,10 +106,13 @@ impl CardDao for SqliteCardDao {
         let mut tx = self.pool.begin().await?;
 
         if !update.accepted_ids.is_empty() {
+            let now = Utc::now();
+
+            // 1) 把选中的卡片标记为 accepted
             let mut builder = QueryBuilder::new(
                 "UPDATE cards SET status = 'accepted', updated_at = ",
             );
-            builder.push_bind(Utc::now());
+            builder.push_bind(now);
             builder.push(" WHERE batch_id = ");
             builder.push_bind(batch_id);
             builder.push(" AND id IN (");
@@ -121,6 +124,27 @@ impl CardDao for SqliteCardDao {
             }
             builder.push(")");
             builder.build().execute(&mut *tx).await?;
+
+            // 2) 把这些卡对应的 review_schedule 在未来的 due_at 拉到 now，
+            //    确保用户一旦接受就能在复习队列里立刻看到。
+            //    已经到期（due_at <= now）或者 status != 'pending' 的行不动。
+            let mut schedule_builder = QueryBuilder::new(
+                "UPDATE review_schedule SET due_at = ",
+            );
+            schedule_builder.push_bind(now);
+            schedule_builder.push(", updated_at = ");
+            schedule_builder.push_bind(now);
+            schedule_builder.push(" WHERE status = 'pending' AND due_at > ");
+            schedule_builder.push_bind(now);
+            schedule_builder.push(" AND card_id IN (");
+            {
+                let mut separated = schedule_builder.separated(", ");
+                for id in &update.accepted_ids {
+                    separated.push_bind(id);
+                }
+            }
+            schedule_builder.push(")");
+            schedule_builder.build().execute(&mut *tx).await?;
         }
 
         if !update.rejected_ids.is_empty() {

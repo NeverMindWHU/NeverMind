@@ -458,6 +458,34 @@ mod tests {
         );
     }
 
+    /// 回归测试：当库中没有任何 accepted 卡片时，聚合 `SELECT MIN(...)` 会返回一行 NULL。
+    /// 历史实现把标量类型写成非 Option 的 `DateTime<Utc>`，导致启动即报
+    /// `invalid datetime: ` 错。现在必须安全返回 `next_due_at = None`。
+    #[tokio::test]
+    async fn get_review_dashboard_returns_none_next_due_when_no_accepted_card() {
+        let (state, pool) = setup_test_state().await;
+
+        // 仅写入一张 pending 状态的卡片 + 其 review_schedule，
+        // 但 card.status != 'accepted'，因此所有聚合查询都会在 WHERE 阶段过滤掉它。
+        seed_card_and_schedule(
+            &pool,
+            "pending-review",
+            "pending-card",
+            "未接受的卡",
+            Utc::now() + Duration::hours(1),
+            1,
+            "pending",
+            "pending",
+        )
+        .await;
+
+        let response = get_review_dashboard(&state).await.unwrap();
+        assert!(response.success);
+        assert_eq!(response.data.due_today, 0);
+        assert_eq!(response.data.completed_today, 0);
+        assert_eq!(response.data.next_due_at, None);
+    }
+
     async fn setup_test_state() -> (AppState, SqlitePool) {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)

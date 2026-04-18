@@ -43,10 +43,8 @@ mod tests {
         assert_eq!(schedule.id, "schedule-1");
         assert_eq!(schedule.card_id, "card-1");
         assert_eq!(schedule.review_step, 1);
-        assert_eq!(
-            schedule.due_at,
-            Utc.with_ymd_and_hms(2026, 4, 19, 10, 0, 0).unwrap()
-        );
+        // 新卡创建后立即到期，对齐 Anki 的 learning queue 行为。
+        assert_eq!(schedule.due_at, created_at);
         assert_eq!(schedule.status, "pending");
     }
 }

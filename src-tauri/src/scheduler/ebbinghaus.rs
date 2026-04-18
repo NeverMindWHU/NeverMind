@@ -15,10 +15,16 @@ pub struct NextReviewDecision {
     pub status: &'static str,
 }
 
+/// 新卡的第一次复习安排。
+///
+/// 对齐 Anki 的「learning queue」心智：卡片一旦接受入库就立即可复习，
+/// 让用户当天就能做一次首检。之后的 step+1 间隔沿用艾宾浩斯表。
+///
+/// 历史上这里是 +1 天，会导致"今天生成的卡明天才能看到"，对用户反直觉。
 pub fn first_review(created_at: DateTime<Utc>) -> NextReviewDecision {
     NextReviewDecision {
         next_step: INITIAL_REVIEW_STEP,
-        next_due_at: created_at + Duration::days(interval_days_for_step(INITIAL_REVIEW_STEP)),
+        next_due_at: created_at,
         status: INITIAL_REVIEW_STATUS,
     }
 }
@@ -67,15 +73,12 @@ mod tests {
     use crate::models::review::ReviewResult;
 
     #[test]
-    fn first_review_uses_initial_step_and_one_day_delay() {
+    fn first_review_is_due_immediately_after_creation() {
         let created_at = Utc.with_ymd_and_hms(2026, 4, 18, 10, 0, 0).unwrap();
         let decision = first_review(created_at);
 
         assert_eq!(decision.next_step, 1);
-        assert_eq!(
-            decision.next_due_at,
-            Utc.with_ymd_and_hms(2026, 4, 19, 10, 0, 0).unwrap()
-        );
+        assert_eq!(decision.next_due_at, created_at);
         assert_eq!(decision.status, "pending");
     }
 

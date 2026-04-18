@@ -399,6 +399,88 @@ mod tests {
         assert_eq!(err.code(), "GENERATION_BATCH_NOT_FOUND");
     }
 
+    /// 回归测试：用户接受卡片后，若 review_schedule 原本定在未来，
+    /// 应被拉回到 now，使卡片立即出现在复习队列里。
+    #[tokio::test]
+    async fn accepting_cards_pulls_future_schedule_due_at_to_now() {
+        let (db, card_dao, review_dao) = setup().await;
+
+        // 模拟旧数据：手动插入一张 pending 卡片 + 未来到期的 schedule。
+        // 这正是改动前用户库里那 3 张卡的状态。
+        card_dao
+            .create_generation_batch(&NewGenerationBatch {
+                id: "batch-legacy".into(),
+                source_type: "manual".into(),
+                source_text: "legacy".into(),
+                selected_keyword: None,
+                context_title: None,
+            })
+            .await
+            .unwrap();
+
+        let now = Utc::now();
+        let future_due = now + chrono::Duration::days(1);
+        card_dao
+            .insert_cards(&[NewCard {
+                id: "card-legacy".into(),
+                batch_id: Some("batch-legacy".into()),
+                keyword: "legacy".into(),
+                definition: "def".into(),
+                explanation: "exp".into(),
+                source_excerpt: None,
+                status: "pending".into(),
+                next_review_at: Some(future_due),
+            }])
+            .await
+            .unwrap();
+        review_dao
+            .create_schedule(&crate::models::review::NewReviewSchedule {
+                id: "sched-legacy".into(),
+                card_id: "card-legacy".into(),
+                review_step: 1,
+                due_at: future_due,
+                status: "pending".into(),
+            })
+            .await
+            .unwrap();
+
+        // 改动前：accept 不会动 schedule；现在应当把 due_at 拉到 <= now。
+        review_generated_cards(
+            &card_dao,
+            ReviewGeneratedCardsInput {
+                batch_id: "batch-legacy".into(),
+                accept_card_ids: vec!["card-legacy".into()],
+                reject_card_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+        let schedule = sqlx::query_as::<_, ReviewSchedule>(
+            r#"
+            SELECT id, card_id, review_step, due_at, status, created_at, updated_at
+            FROM review_schedule
+            WHERE id = 'sched-legacy'
+            "#,
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(
+            schedule.due_at <= Utc::now(),
+            "接受后 due_at 应被拉到 <= now（实际 {:?}）",
+            schedule.due_at
+        );
+
+        // 既然 status=accepted 且 due_at <= now，list_due_reviews 必须能拿到它。
+        let items = review_dao.list_due_reviews(10).await.unwrap();
+        assert!(
+            items.iter().any(|x| x.card_id == "card-legacy"),
+            "刚接受的卡应立即出现在 list_due_reviews 结果中"
+        );
+    }
+
     #[test]
     fn validate_generate_input_rejects_empty_text() {
         let mut input = sample_input();

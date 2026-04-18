@@ -205,7 +205,12 @@ impl ReviewDao for SqliteReviewDao {
     }
 
     async fn get_next_due_at(&self) -> AppResult<Option<DateTime<Utc>>> {
-        let next_due_at = sqlx::query_scalar::<_, DateTime<Utc>>(
+        // `SELECT MIN(...)` 是聚合查询：即使 WHERE 匹配不到任何行，SQLite
+        // 也会返回 **一行 NULL**。若把标量类型写成非 Option 的 `DateTime<Utc>`，
+        // `fetch_optional` 会拿到 `Some(row)` 再去把 NULL 解码到 `DateTime<Utc>`，
+        // 触发 `invalid datetime: ` 错误。因此这里显式用 Option 作为标量类型，
+        // 并用 `fetch_one`（聚合永远返回一行）避免歧义。
+        let next_due_at: Option<DateTime<Utc>> = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
             r#"
             SELECT MIN(rs.due_at)
             FROM review_schedule rs
@@ -214,7 +219,7 @@ impl ReviewDao for SqliteReviewDao {
               AND c.status = 'accepted'
             "#,
         )
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
         Ok(next_due_at)

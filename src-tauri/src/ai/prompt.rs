@@ -23,10 +23,31 @@ pub fn build_prompt(
     context_title: Option<&str>,
     has_images: bool,
 ) -> String {
-    let keyword_hint = match selected_keyword {
-        Some(k) if !k.trim().is_empty() => format!("请重点围绕关键词「{}」提炼。\n", k.trim()),
-        _ => String::new(),
+    // 关键词策略：
+    // - 用户指定了 selected_keyword → 整批围绕这一个关键词提炼（1~3 张卡，数量由内容决定）
+    // - 未指定 → 由模型自主从原文/图片中选出**恰好 3 个不同的关键词**，为每个生成 1 张卡，
+    //   正好产出 3 张。这样每张卡的 `keyword` 字段自然承担了"关键词"语义，
+    //   前端/宝库只要展示 card.keyword 即可。
+    let has_user_keyword = selected_keyword
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false);
+
+    let (card_count_hint, keyword_hint) = if has_user_keyword {
+        let k = selected_keyword.unwrap().trim();
+        (
+            "请根据内容提炼 1 到 3 张结构化的知识卡片。".to_string(),
+            format!(
+                "请整批围绕关键词「{}」展开，每张卡片的 `keyword` 字段应当是该关键词或其紧密相关的子概念。\n",
+                k
+            ),
+        )
+    } else {
+        (
+            "请从下列内容中自主挑选**恰好 3 个不同的关键词**，为每个关键词生成一张卡片，最终返回正好 3 张卡片。".to_string(),
+            "未指定关注关键词时，每张卡片的 `keyword` 字段必须互不相同，覆盖内容里最值得记忆的 3 个知识点。\n".to_string(),
+        )
     };
+
     let context_hint = match context_title {
         Some(c) if !c.trim().is_empty() => format!("来源标题：{}\n", c.trim()),
         _ => String::new(),
@@ -47,7 +68,7 @@ pub fn build_prompt(
     };
 
     format!(
-        r#"你是一名知识卡片生成助手。请阅读下列内容，提炼 1 到 3 张结构化的知识卡片。
+        r#"你是一名知识卡片生成助手。{card_count_hint}
 
 严格按如下 JSON 返回，不要输出任何额外说明或 Markdown 代码块以外的文字：
 {{
@@ -64,6 +85,7 @@ pub fn build_prompt(
 }}
 
 {context_hint}{keyword_hint}{content_section}"#,
+        card_count_hint = card_count_hint,
         context_hint = context_hint,
         keyword_hint = keyword_hint,
         content_section = content_section,
@@ -85,14 +107,35 @@ mod tests {
         assert!(p.contains("艾宾浩斯遗忘曲线"));
         assert!(p.contains("遗忘曲线"));
         assert!(p.contains("心理学笔记"));
+        // 指定关键词时保留 1~3 张卡的灵活性
+        assert!(p.contains("1 到 3 张"));
     }
 
     #[test]
-    fn prompt_without_optional_fields() {
+    fn prompt_without_optional_fields_requires_three_keywords() {
         let p = build_prompt("只给原文。", None, None, false);
         assert!(p.contains("只给原文"));
         assert!(!p.contains("来源标题"));
-        assert!(!p.contains("请重点围绕关键词"));
+        // 未指定关键词时：要求恰好 3 个不同关键词、正好 3 张卡
+        assert!(
+            p.contains("恰好 3 个不同的关键词"),
+            "未指定关键词时 prompt 必须要求 3 个关键词，实际 prompt: {p}"
+        );
+        assert!(
+            p.contains("正好 3 张"),
+            "未指定关键词时 prompt 必须要求正好 3 张卡，实际 prompt: {p}"
+        );
+        assert!(
+            p.contains("互不相同"),
+            "未指定关键词时 prompt 必须要求每张卡的 keyword 互不相同"
+        );
+    }
+
+    #[test]
+    fn prompt_with_blank_selected_keyword_treated_as_unset() {
+        let p = build_prompt("原文。", Some("   "), None, false);
+        // 空白字符串视同未指定，走自动 3 关键词分支
+        assert!(p.contains("恰好 3 个不同的关键词"));
     }
 
     #[test]

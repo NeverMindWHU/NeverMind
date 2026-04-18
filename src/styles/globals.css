@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   全局变量与基础样式
+   ============================================================================ */
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-feature-settings: "tnum";
+}
+
+/* 禁止文本被意外拖拽选中的地方（如顶部拖动区） */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 简易滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184 / 0.45);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184 / 0.65);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============================================================================
+   Anki 风格翻卡：3D 视角
+   ============================================================================ */
+.card-flip-scene {
+  perspective: 1400px;
+}
+
+.card-flip-inner {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-flip-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.card-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.card-face-back {
+  transform: rotateY(180deg);
+}
