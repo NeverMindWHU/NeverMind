@@ -1,0 +1,159 @@
+use async_trait::async_trait;
+use chrono::Utc;
+use sqlx::SqlitePool;
+
+use crate::{
+    models::review::{DueReviewItem, NewReviewLog, NewReviewSchedule, ReviewLog, ReviewSchedule},
+    utils::error::{AppError, AppResult},
+};
+
+#[async_trait]
+pub trait ReviewDao: Send + Sync {
+    async fn create_schedule(&self, schedule: &NewReviewSchedule) -> AppResult<()>;
+    async fn list_due_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>>;
+    async fn get_schedule(&self, review_id: &str) -> AppResult<ReviewSchedule>;
+    async fn update_schedule_after_review(
+        &self,
+        review_id: &str,
+        next_step: i64,
+        next_due_at: chrono::DateTime<Utc>,
+        status: &str,
+    ) -> AppResult<()>;
+    async fn insert_review_log(&self, log: &NewReviewLog) -> AppResult<ReviewLog>;
+}
+
+#[derive(Clone)]
+pub struct SqliteReviewDao {
+    pool: SqlitePool,
+}
+
+impl SqliteReviewDao {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl ReviewDao for SqliteReviewDao {
+    async fn create_schedule(&self, schedule: &NewReviewSchedule) -> AppResult<()> {
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            INSERT INTO review_schedule (id, card_id, review_step, due_at, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&schedule.id)
+        .bind(&schedule.card_id)
+        .bind(schedule.review_step)
+        .bind(schedule.due_at)
+        .bind(&schedule.status)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_due_reviews(&self, limit: i64) -> AppResult<Vec<DueReviewItem>> {
+        let items = sqlx::query_as::<_, DueReviewItem>(
+            r#"
+            SELECT rs.id AS review_id,
+                   c.id AS card_id,
+                   c.keyword,
+                   c.definition,
+                   c.explanation,
+                   rs.review_step,
+                   rs.due_at
+            FROM review_schedule rs
+            INNER JOIN cards c ON c.id = rs.card_id
+            WHERE rs.status = 'pending'
+              AND c.status = 'accepted'
+              AND rs.due_at <= ?
+            ORDER BY rs.due_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(Utc::now())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(items)
+    }
+
+    async fn get_schedule(&self, review_id: &str) -> AppResult<ReviewSchedule> {
+        let schedule = sqlx::query_as::<_, ReviewSchedule>(
+            r#"
+            SELECT id, card_id, review_step, due_at, status, created_at, updated_at
+            FROM review_schedule
+            WHERE id = ?
+            "#,
+        )
+        .bind(review_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        schedule.ok_or(AppError::NotFound {
+            entity: "review_schedule",
+        })
+    }
+
+    async fn update_schedule_after_review(
+        &self,
+        review_id: &str,
+        next_step: i64,
+        next_due_at: chrono::DateTime<Utc>,
+        status: &str,
+    ) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE review_schedule
+            SET review_step = ?, due_at = ?, status = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(next_step)
+        .bind(next_due_at)
+        .bind(status)
+        .bind(Utc::now())
+        .bind(review_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn insert_review_log(&self, log: &NewReviewLog) -> AppResult<ReviewLog> {
+        sqlx::query(
+            r#"
+            INSERT INTO review_logs (
+                id, review_schedule_id, card_id, result, previous_step, next_step, reviewed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&log.id)
+        .bind(&log.review_schedule_id)
+        .bind(&log.card_id)
+        .bind(&log.result)
+        .bind(log.previous_step)
+        .bind(log.next_step)
+        .bind(log.reviewed_at)
+        .execute(&self.pool)
+        .await?;
+
+        let saved = sqlx::query_as::<_, ReviewLog>(
+            r#"
+            SELECT id, review_schedule_id, card_id, result, previous_step, next_step, reviewed_at
+            FROM review_logs
+            WHERE id = ?
+            "#,
+        )
+        .bind(&log.id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(saved)
+    }
+}
