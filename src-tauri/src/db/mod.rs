@@ -1,8 +1,13 @@
 pub mod dao;
 
 use std::path::Path;
+use std::str::FromStr;
 
-use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{
+    migrate::Migrator,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    SqlitePool,
+};
 
 use crate::utils::error::AppResult;
 
@@ -25,9 +30,12 @@ impl Database {
             }
         }
 
+        // sqlx 默认不会创建不存在的 sqlite 文件，需显式开启 create_if_missing。
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(database_url)
+            .connect_with(options)
             .await?;
 
         Ok(Self { pool })
