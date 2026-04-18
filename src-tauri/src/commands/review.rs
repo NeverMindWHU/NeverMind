@@ -242,9 +242,16 @@ fn calculate_streak_days(days: Vec<String>, today: NaiveDate) -> AppResult<i64> 
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
+    use chrono::{Duration, NaiveDate, Utc};
+    use sqlx::{migrate::Migrator, query_scalar, sqlite::SqlitePoolOptions, SqlitePool};
 
-    use super::calculate_streak_days;
+    use super::{
+        calculate_streak_days, get_review_dashboard, list_due_reviews, submit_review_result,
+        ListDueReviewsInput, SubmitReviewResultInput,
+    };
+    use crate::{models::review::ReviewResult, state::AppState};
+
+    static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
     #[test]
     fn streak_counts_consecutive_days_ending_today() {
@@ -271,4 +278,270 @@ mod tests {
 
         assert_eq!(streak, 0);
     }
+
+    #[tokio::test]
+    async fn list_due_reviews_returns_seeded_mock_data() {
+        let (state, pool) = setup_test_state().await;
+        let now = Utc::now();
+
+        seed_card_and_schedule(
+            &pool,
+            "review-due-1",
+            "card-due-1",
+            "已到期卡片 A",
+            now - Duration::hours(2),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-due-2",
+            "card-due-2",
+            "已到期卡片 B",
+            now - Duration::minutes(30),
+            2,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-future-1",
+            "card-future-1",
+            "未来卡片",
+            now + Duration::days(1),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-rejected-1",
+            "card-rejected-1",
+            "已拒绝卡片",
+            now - Duration::hours(1),
+            1,
+            "rejected",
+            "pending",
+        )
+        .await;
+        seed_review_log(&pool, "log-today-1", "review-due-1", "card-due-1", now).await;
+
+        let response = list_due_reviews(
+            &state,
+            ListDueReviewsInput {
+                limit: Some(10),
+                cursor: None,
+                include_completed_today: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.data.items.len(), 2);
+        assert_eq!(response.data.summary.due_count, 2);
+        assert_eq!(response.data.summary.completed_today, 1);
+        assert_eq!(response.data.items[0].review_id, "review-due-1");
+        assert_eq!(response.data.items[1].review_id, "review-due-2");
+        assert!(response.data.items.iter().all(|item| item.tags.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn submit_review_result_updates_schedule_and_inserts_log() {
+        let (state, pool) = setup_test_state().await;
+        let now = Utc::now();
+
+        seed_card_and_schedule(
+            &pool,
+            "review-submit-1",
+            "card-submit-1",
+            "提交测试卡片",
+            now - Duration::hours(1),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+
+        let reviewed_at = now;
+        let response = submit_review_result(
+            &state,
+            SubmitReviewResultInput {
+                review_id: "review-submit-1".to_string(),
+                card_id: "card-submit-1".to_string(),
+                result: ReviewResult::Remembered,
+                reviewed_at,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.data.previous_step, 1);
+        assert_eq!(response.data.next_step, 2);
+        assert_eq!(response.data.remaining_due_count, 0);
+        assert!(response.data.next_review_at > reviewed_at);
+
+        let schedule = state
+            .review_dao
+            .get_schedule("review-submit-1")
+            .await
+            .unwrap();
+        assert_eq!(schedule.review_step, 2);
+        assert_eq!(schedule.status, "pending");
+        assert_eq!(schedule.due_at, response.data.next_review_at);
+
+        let log_count: i64 = query_scalar("SELECT COUNT(*) FROM review_logs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(log_count, 1);
+    }
+
+    #[tokio::test]
+    async fn get_review_dashboard_uses_seeded_mock_data() {
+        let (state, pool) = setup_test_state().await;
+        let now = Utc::now();
+
+        seed_card_and_schedule(
+            &pool,
+            "review-dashboard-due",
+            "card-dashboard-due",
+            "今日到期",
+            now - Duration::minutes(10),
+            1,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_card_and_schedule(
+            &pool,
+            "review-dashboard-next",
+            "card-dashboard-next",
+            "下一次到期",
+            now + Duration::hours(5),
+            2,
+            "accepted",
+            "pending",
+        )
+        .await;
+        seed_review_log(
+            &pool,
+            "log-dashboard-today",
+            "review-dashboard-due",
+            "card-dashboard-due",
+            now - Duration::minutes(5),
+        )
+        .await;
+        seed_review_log(
+            &pool,
+            "log-dashboard-yesterday",
+            "review-dashboard-due",
+            "card-dashboard-due",
+            now - Duration::days(1),
+        )
+        .await;
+
+        let response = get_review_dashboard(&state).await.unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.data.due_today, 1);
+        assert_eq!(response.data.completed_today, 1);
+        assert_eq!(response.data.streak_days, 2);
+        assert_eq!(
+            response.data.next_due_at,
+            Some(now - Duration::minutes(10))
+        );
+    }
+
+    async fn setup_test_state() -> (AppState, SqlitePool) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        TEST_MIGRATOR.run(&pool).await.unwrap();
+
+        (AppState::from_pool(pool.clone()), pool)
+    }
+
+    async fn seed_card_and_schedule(
+        pool: &SqlitePool,
+        review_id: &str,
+        card_id: &str,
+        keyword: &str,
+        due_at: chrono::DateTime<Utc>,
+        review_step: i64,
+        card_status: &str,
+        schedule_status: &str,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO cards (
+                id, batch_id, keyword, definition, explanation, source_excerpt,
+                status, created_at, updated_at, next_review_at
+            )
+            VALUES (?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(card_id)
+        .bind(keyword)
+        .bind(format!("{keyword} 定义"))
+        .bind(format!("{keyword} 解释"))
+        .bind(card_status)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .bind(due_at)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO review_schedule (
+                id, card_id, review_step, due_at, status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(review_id)
+        .bind(card_id)
+        .bind(review_step)
+        .bind(due_at)
+        .bind(schedule_status)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn seed_review_log(
+        pool: &SqlitePool,
+        log_id: &str,
+        review_id: &str,
+        card_id: &str,
+        reviewed_at: chrono::DateTime<Utc>,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO review_logs (
+                id, review_schedule_id, card_id, result, previous_step, next_step, reviewed_at
+            )
+            VALUES (?, ?, ?, 'remembered', 1, 2, ?)
+            "#,
+        )
+        .bind(log_id)
+        .bind(review_id)
+        .bind(card_id)
+        .bind(reviewed_at)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
 }
