@@ -104,6 +104,55 @@ npm run tauri build
 └─────────────────────────────────────────────┘
 ```
 
+### 目录结构说明
+
+```text
+NeverMind/
+├── README.md
+├── .gitignore
+├── docs/
+│   ├── architecture/     # 架构设计文档
+│   └── product/          # 产品说明与需求文档
+├── scripts/
+│   ├── release/          # 发布脚本
+│   └── setup/            # 环境初始化脚本
+├── src/                  # 前端应用层
+│   ├── app/              # 应用入口与路由装配
+│   ├── assets/           # 静态资源
+│   ├── components/       # 通用组件
+│   ├── features/         # 按业务模块拆分
+│   │   ├── card-generation/  # 知识卡片生成
+│   │   ├── library/          # 知识宝库管理
+│   │   ├── review/           # 复习流程
+│   │   └── settings/         # 应用设置
+│   ├── layouts/          # 页面布局
+│   ├── lib/              # 工具函数与基础能力封装
+│   ├── pages/            # 页面级视图
+│   ├── store/            # 全局状态管理
+│   ├── styles/           # 全局样式
+│   └── types/            # 类型定义
+├── src-tauri/            # Tauri / Rust 核心层
+│   ├── capabilities/     # Tauri 能力声明
+│   ├── icons/            # 应用图标资源
+│   ├── migrations/       # SQLite 数据迁移脚本
+│   └── src/
+│       ├── ai/           # AI 请求调度与模型接入
+│       ├── commands/     # Tauri IPC 命令入口
+│       ├── db/dao/       # 数据访问层
+│       ├── models/       # 核心数据模型
+│       ├── notifications/# 系统通知
+│       ├── scheduler/    # 艾宾浩斯复习排期引擎
+│       ├── state/        # 全局运行时状态
+│       ├── tray/         # 系统托盘相关逻辑
+│       └── utils/        # Rust 工具函数
+└── tests/
+    ├── e2e/              # 端到端测试
+    ├── fixtures/         # 测试数据
+    └── integration/      # 集成测试
+```
+
+该结构遵循“前端视图层 + Rust 核心层 + 本地数据层”的分层思路，同时在前端侧按业务模块拆分，在 Rust 侧按职责边界拆分，便于后续逐步扩展 AI 生成、复习调度、通知提醒和本地存储能力。
+
 ---
 
 ## 🗺 项目规划
