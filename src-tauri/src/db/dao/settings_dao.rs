@@ -32,7 +32,7 @@ impl SettingsDao for SqliteSettingsDao {
         let settings = sqlx::query_as::<_, AppSettings>(
             r#"
             SELECT id, theme, language, notification_enabled, review_reminder_enabled,
-                   review_reminder_time, default_model_profile_id, export_directory, updated_at
+                   review_reminder_time, default_model_profile_id, export_directory, screenshot_shortcut, updated_at
             FROM settings
             WHERE id = 1
             "#,
@@ -49,9 +49,9 @@ impl SettingsDao for SqliteSettingsDao {
             r#"
             INSERT INTO settings (
                 id, theme, language, notification_enabled, review_reminder_enabled,
-                review_reminder_time, default_model_profile_id, export_directory, updated_at
+                review_reminder_time, default_model_profile_id, export_directory, screenshot_shortcut, updated_at
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 theme = excluded.theme,
                 language = excluded.language,
@@ -60,6 +60,7 @@ impl SettingsDao for SqliteSettingsDao {
                 review_reminder_time = excluded.review_reminder_time,
                 default_model_profile_id = excluded.default_model_profile_id,
                 export_directory = excluded.export_directory,
+                screenshot_shortcut = excluded.screenshot_shortcut,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -70,6 +71,7 @@ impl SettingsDao for SqliteSettingsDao {
         .bind(&input.review_reminder_time)
         .bind(&input.default_model_profile_id)
         .bind(&input.export_directory)
+        .bind(&input.screenshot_shortcut)
         .bind(now)
         .execute(&self.pool)
         .await?;

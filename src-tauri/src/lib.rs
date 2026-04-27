@@ -28,8 +28,53 @@ pub fn run() {
             )
         });
 
+    let shortcut_str = tauri::async_runtime::block_on(async {
+        if let Ok(Some(settings)) = app_state.settings_dao.get_settings().await {
+            settings.screenshot_shortcut
+        } else {
+            "ctrl+shift+a".to_string()
+        }
+    });
+
+    let mut shortcut_builder = tauri_plugin_global_shortcut::Builder::new();
+    if let Ok(s) = shortcut_str.parse::<tauri_plugin_global_shortcut::Shortcut>() {
+        shortcut_builder = shortcut_builder.with_shortcuts([s]).unwrap_or_else(|e| {
+            eprintln!("Failed to register shortcut from settings: {}", e);
+            tauri_plugin_global_shortcut::Builder::new()
+        });
+    }
+
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            shortcut_builder
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        use tauri::Manager;
+                        let buf: tauri::State<'_, crate::commands::screenshot::ScreenshotBuffer> = app.state();
+                        let _ = tauri::async_runtime::block_on(
+                            crate::commands::screenshot::spawn_screenshot_windows(app.clone(), buf)
+                        );
+                    }
+                })
+                .build(),
+        )
         .manage(app_state)
+        .manage(crate::commands::screenshot::ScreenshotBuffer(
+            std::sync::Mutex::new(std::collections::HashMap::new()),
+        ))
+        .setup(|app| {
+            commands::tray::setup_tray(app)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ipc::generate_cards,
             commands::ipc::list_generated_cards,
@@ -47,6 +92,13 @@ pub fn run() {
             commands::ipc::library_search_by_keyword,
             commands::ipc::library_search_by_question,
             commands::ipc::library_list_keyword_buckets,
+            commands::screenshot::capture_screen,
+            commands::screenshot::capture_monitor,
+            commands::screenshot::get_captured_monitor,
+            commands::screenshot::spawn_screenshot_window,
+            commands::screenshot::spawn_screenshot_windows,
+            commands::screenshot::close_screenshot_windows,
+            commands::tray::sync_tray_generation_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

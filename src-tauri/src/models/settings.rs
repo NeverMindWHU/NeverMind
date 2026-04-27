@@ -12,6 +12,7 @@ pub struct AppSettings {
     pub review_reminder_time: String,
     pub default_model_profile_id: Option<String>,
     pub export_directory: Option<String>,
+    pub screenshot_shortcut: String,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -38,6 +39,7 @@ pub struct UpsertSettings {
     pub review_reminder_time: String,
     pub default_model_profile_id: Option<String>,
     pub export_directory: Option<String>,
+    pub screenshot_shortcut: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

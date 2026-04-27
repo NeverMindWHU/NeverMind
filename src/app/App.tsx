@@ -7,6 +7,7 @@ import { ReviewPage } from "@/features/review/pages/ReviewPage";
 import { LibraryPage } from "@/features/library/pages/LibraryPage";
 import { SettingsPage } from "@/features/settings/pages/SettingsPage";
 import { GenerationTasksProvider } from "@/features/generation-tasks/GenerationTasksContext";
+import { ScreenshotPage } from "@/features/screenshot/pages/ScreenshotPage";
 
 /**
  * 用 HashRouter：Tauri 本地产物是 file:// 协议下的 index.html，
@@ -23,6 +24,7 @@ export default function App() {
       <HashRouter>
         <GenerationTasksProvider>
           <Routes>
+            <Route path="/screenshot" element={<ScreenshotPage />} />
             <Route element={<AppShell />}>
               <Route index element={<HomePage />} />
               <Route path="generate" element={<GeneratePage />} />

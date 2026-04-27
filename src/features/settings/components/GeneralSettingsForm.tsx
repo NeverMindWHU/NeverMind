@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save } from "lucide-react";
+import { Bell, Save } from "lucide-react";
 import { Button } from "@/components/Button";
 import { FieldLabel, Input, Panel, Select } from "@/components/Card";
 import type {
@@ -8,6 +8,8 @@ import type {
   ThemeMode,
   UpdateSettingsInput,
 } from "@/types/settings";
+import { useToast } from "@/lib/toast";
+import { sendTestSystemNotification } from "@/lib/system-notification";
 
 interface Props {
   settings: AppSettingsData;
@@ -16,6 +18,8 @@ interface Props {
 }
 
 export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
+  const toast = useToast();
+  const [testingNotify, setTestingNotify] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(settings.theme);
   const [language, setLanguage] = useState<Language>(settings.language);
   const [notificationEnabled, setNotificationEnabled] = useState(
@@ -30,6 +34,9 @@ export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
   const [exportDirectory, setExportDirectory] = useState(
     settings.storage.exportDirectory ?? ""
   );
+  const [screenshotShortcut, setScreenshotShortcut] = useState(
+    settings.screenshotShortcut
+  );
 
   useEffect(() => {
     setTheme(settings.theme);
@@ -38,7 +45,37 @@ export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
     setReviewReminderEnabled(settings.reviewReminderEnabled);
     setReviewReminderTime(settings.reviewReminderTime);
     setExportDirectory(settings.storage.exportDirectory ?? "");
+    setScreenshotShortcut(settings.screenshotShortcut);
   }, [settings]);
+
+  async function handleTestNotification() {
+    setTestingNotify(true);
+    try {
+      const r = await sendTestSystemNotification();
+      if (r.ok) {
+        toast.success(
+          "已发送测试通知",
+          "若未看到系统气泡，请检查系统与桌面环境的通知权限。"
+        );
+        return;
+      }
+      if (r.reason === "disabled") {
+        toast.error("无法测试", "请先开启上方的「桌面通知」开关。");
+        return;
+      }
+      if (r.reason === "denied") {
+        toast.error("无法测试", "通知权限被拒绝，请在系统设置中允许 NeverMind 发送通知。");
+        return;
+      }
+      if (r.reason === "unsupported") {
+        toast.error("无法测试", "当前环境不支持系统通知。");
+        return;
+      }
+      toast.error("无法测试", "发送失败，请稍后再试。");
+    } finally {
+      setTestingNotify(false);
+    }
+  }
 
   function handleSave() {
     void onSave({
@@ -50,6 +87,7 @@ export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
       storage: {
         exportDirectory: exportDirectory.trim() || null,
       },
+      screenshotShortcut: screenshotShortcut.trim() || "ctrl+shift+a",
     });
   }
 
@@ -89,6 +127,23 @@ export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
           onChange={setNotificationEnabled}
         />
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            leftIcon={<Bell className="h-3.5 w-3.5" />}
+            loading={testingNotify}
+            disabled={!notificationEnabled || testingNotify}
+            onClick={() => void handleTestNotification()}
+          >
+            发送测试通知
+          </Button>
+          <span className="text-xs text-ink-500">
+            需先开启「桌面通知」。首次使用可能弹出系统权限请求。
+          </span>
+        </div>
+
         <ToggleRow
           label="每日复习提醒"
           description="在指定时间提醒你进入复习。"
@@ -114,6 +169,21 @@ export function GeneralSettingsForm({ settings, saving, onSave }: Props) {
               value={exportDirectory}
               onChange={(e) => setExportDirectory(e.target.value)}
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <FieldLabel>截图全局快捷键</FieldLabel>
+            <Input
+              type="text"
+              placeholder="例如: ctrl+shift+a"
+              value={screenshotShortcut}
+              onChange={(e) => setScreenshotShortcut(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-ink-500">
+              格式如：ctrl+shift+a 或 CommandOrControl+Shift+A
+            </p>
           </div>
         </div>
 

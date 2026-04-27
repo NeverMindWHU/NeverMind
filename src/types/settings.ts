@@ -20,6 +20,7 @@ export interface AppSettingsData {
   reviewReminderTime: string;
   defaultModelProfileId: string | null;
   storage: StorageSettingsData;
+  screenshotShortcut: string;
 }
 
 export interface UpdateSettingsInput {
@@ -29,6 +30,7 @@ export interface UpdateSettingsInput {
   reviewReminderEnabled: boolean;
   reviewReminderTime: string;
   storage: StorageSettingsData;
+  screenshotShortcut: string;
 }
 
 export interface UpdateSettingsData {

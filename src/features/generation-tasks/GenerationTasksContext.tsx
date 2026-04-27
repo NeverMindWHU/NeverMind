@@ -11,10 +11,22 @@ import {
 import clsx from "clsx";
 import { AlertTriangle, CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { Link } from "react-router-dom";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { generateCards as apiGenerate } from "@/features/card-generation/services/api";
 import { rememberBatch } from "@/lib/recent-batches";
+import {
+  GENERATION_FROM_SCREENSHOT_EVENT,
+  type GenerationFromScreenshotPayload,
+} from "@/lib/generation-from-screenshot";
 import { useToast } from "@/lib/toast";
 import { humanizeError, formatRelative } from "@/lib/format";
+import { notifyScreenshotCardGenerationStarted } from "@/lib/system-notification";
+import {
+  computeTrayGenerationState,
+  syncTrayGenerationState,
+} from "@/lib/tray-generation-sync";
+import { isTauri } from "@/lib/tauri";
 import type {
   GenerateCardsInput,
   GeneratedCardBatchResult,
@@ -147,6 +159,39 @@ export function GenerationTasksProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  /** 截图 overlay 独立窗口内通过事件把图片交给主窗口，走同一套后台生成与任务栏逻辑。 */
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (getCurrentWindow().label !== "main") return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void listen<GenerationFromScreenshotPayload>(
+      GENERATION_FROM_SCREENSHOT_EVENT,
+      (e) => {
+        if (cancelled) return;
+        const p = e.payload;
+        startGeneration({
+          sourceText: p.sourceText ?? "",
+          sourceType: p.sourceType,
+          imageUrls: p.imageUrls ?? [],
+          selectedKeyword: p.selectedKeyword,
+          contextTitle: p.contextTitle,
+          modelProfileId: p.modelProfileId,
+        });
+        void notifyScreenshotCardGenerationStarted();
+      }
+    ).then((fn) => {
+      if (!cancelled) unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [startGeneration]);
+
   const dismissTask = useCallback((id: string) => {
     setTasks((prev) =>
       prev.filter((t) => !(t.id === id && t.status !== "running"))
@@ -167,6 +212,18 @@ export function GenerationTasksProvider({ children }: { children: ReactNode }) {
     () => tasks.filter((t) => t.status === "running").length,
     [tasks]
   );
+
+  /** 主窗口：托盘图标与生成任务状态同步（短防抖，减少图标闪烁） */
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (getCurrentWindow().label !== "main") return;
+
+    const state = computeTrayGenerationState(tasks);
+    const t = window.setTimeout(() => {
+      void syncTrayGenerationState(state).catch(() => {});
+    }, 200);
+    return () => clearTimeout(t);
+  }, [tasks]);
 
   const api = useMemo<GenerationTasksApi>(
     () => ({

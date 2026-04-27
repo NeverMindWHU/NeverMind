@@ -93,10 +93,11 @@ pub async fn get_settings(
 
 #[tauri::command]
 pub async fn update_settings(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: settings::UpdateSettingsInput,
 ) -> Result<settings::CommandResponse<settings::UpdateSettingsData>, CommandError> {
-    settings::update_settings(state.inner(), input)
+    settings::update_settings(Some(&app), state.inner(), input)
         .await
         .map_err(CommandError::from)
 }

@@ -20,3 +20,10 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+.agent
+.claude
+.cursor
+.gemini
+.trae/skills
+openspec
+.vimsession.vim

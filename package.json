@@ -12,7 +12,9 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/api": "2.0.0",
+    "@tauri-apps/plugin-global-shortcut": "~2.0.0",
+    "@tauri-apps/plugin-notification": "2.0.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.452.0",
     "react": "^18.3.1",
@@ -20,7 +22,7 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0",
+    "@tauri-apps/cli": "2.0.0",
     "@types/node": "^25.6.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

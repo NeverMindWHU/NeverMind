@@ -45,6 +45,7 @@ pub struct AppSettingsData {
     pub review_reminder_time: String,
     pub default_model_profile_id: Option<String>,
     pub storage: StorageSettingsData,
+    pub screenshot_shortcut: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,7 @@ pub struct UpdateSettingsInput {
     pub review_reminder_enabled: bool,
     pub review_reminder_time: String,
     pub storage: StorageSettingsData,
+    pub screenshot_shortcut: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +123,7 @@ pub struct TestModelProfileData {
 const DEFAULT_THEME: &str = "system";
 const DEFAULT_LANGUAGE: &str = "zh-CN";
 const DEFAULT_REVIEW_REMINDER_TIME: &str = "09:00";
+const DEFAULT_SCREENSHOT_SHORTCUT: &str = "ctrl+shift+a";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +161,7 @@ pub async fn get_settings(state: &AppState) -> AppResult<CommandResponse<AppSett
 }
 
 pub async fn update_settings(
+    app: Option<&tauri::AppHandle>,
     state: &AppState,
     input: UpdateSettingsInput,
 ) -> AppResult<CommandResponse<UpdateSettingsData>> {
@@ -179,8 +183,21 @@ pub async fn update_settings(
             review_reminder_time: input.review_reminder_time,
             default_model_profile_id,
             export_directory: input.storage.export_directory,
+            screenshot_shortcut: input.screenshot_shortcut.clone(),
         })
         .await?;
+
+    if let Some(app_handle) = app {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        
+        if let Ok(shortcut) = tauri_plugin_global_shortcut::Shortcut::from_str(&input.screenshot_shortcut) {
+            let _ = app_handle.global_shortcut().unregister_all();
+            if let Err(e) = app_handle.global_shortcut().register(shortcut) {
+                eprintln!("Failed to register new shortcut: {}", e);
+            }
+        }
+    }
 
     Ok(CommandResponse::ok(UpdateSettingsData {
         updated_at: saved.updated_at,
@@ -250,6 +267,7 @@ pub async fn save_model_profile(
                 review_reminder_time: DEFAULT_REVIEW_REMINDER_TIME.to_string(),
                 default_model_profile_id: Some(saved.id.clone()),
                 export_directory: None,
+                screenshot_shortcut: DEFAULT_SCREENSHOT_SHORTCUT.to_string(),
             });
 
         state
@@ -335,6 +353,7 @@ fn default_settings() -> AppSettingsData {
         storage: StorageSettingsData {
             export_directory: None,
         },
+        screenshot_shortcut: DEFAULT_SCREENSHOT_SHORTCUT.to_string(),
     }
 }
 
@@ -349,6 +368,7 @@ fn map_settings(settings: AppSettings) -> AppSettingsData {
         storage: StorageSettingsData {
             export_directory: settings.export_directory,
         },
+        screenshot_shortcut: settings.screenshot_shortcut,
     }
 }
 
@@ -372,6 +392,7 @@ fn app_settings_to_upsert(settings: &AppSettings) -> UpsertSettings {
         review_reminder_time: settings.review_reminder_time.clone(),
         default_model_profile_id: settings.default_model_profile_id.clone(),
         export_directory: settings.export_directory.clone(),
+        screenshot_shortcut: settings.screenshot_shortcut.clone(),
     }
 }
 
@@ -517,6 +538,7 @@ mod tests {
         let state = setup_test_state().await;
 
         let response = update_settings(
+            None,
             &state,
             UpdateSettingsInput {
                 theme: "dark".to_string(),
@@ -527,6 +549,7 @@ mod tests {
                 storage: StorageSettingsData {
                     export_directory: Some("/tmp/nevermind".to_string()),
                 },
+                screenshot_shortcut: "ctrl+shift+b".to_string(),
             },
         )
         .await
@@ -540,6 +563,7 @@ mod tests {
         assert!(!settings.notification_enabled);
         assert_eq!(settings.review_reminder_time, "08:30");
         assert_eq!(settings.export_directory.as_deref(), Some("/tmp/nevermind"));
+        assert_eq!(settings.screenshot_shortcut, "ctrl+shift+b");
     }
 
     #[tokio::test]
@@ -622,6 +646,7 @@ mod tests {
 
         // 顺带保存一个 settings / model_profile，验证它们不会被清掉。
         update_settings(
+            None,
             &state,
             UpdateSettingsInput {
                 theme: "dark".into(),
@@ -632,6 +657,7 @@ mod tests {
                 storage: StorageSettingsData {
                     export_directory: None,
                 },
+                screenshot_shortcut: "ctrl+shift+a".to_string(),
             },
         )
         .await
