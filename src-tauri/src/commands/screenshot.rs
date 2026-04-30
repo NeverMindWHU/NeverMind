@@ -1,4 +1,5 @@
 use tauri::AppHandle;
+use tauri_utils::config::WindowConfig;
 use xcap::Monitor;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -98,21 +99,24 @@ pub async fn spawn_screenshot_windows(
 
         let url = format!("index.html#/screenshot?monitor={}", i);
 
-        let win = tauri::WebviewWindowBuilder::new(
-            &app,
-            &label,
-            tauri::WebviewUrl::App(url.into()),
-        )
-        .title("Screenshot Overlay")
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .position(*mon_x, *mon_y)
-        .inner_size(*mon_w, *mon_h)
-        .fullscreen(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+        let mut config = WindowConfig::default();
+        config.label = label;
+        config.url = tauri::WebviewUrl::App(url.into());
+        config.transparent = true;
+        config.decorations = false;
+        config.always_on_top = true;
+        config.skip_taskbar = true;
+        config.fullscreen = true;
+        config.x = Some(*mon_x);
+        config.y = Some(*mon_y);
+        config.width = *mon_w;
+        config.height = *mon_h;
+        config.title = "Screenshot Overlay".to_string();
+
+        let win = tauri::WebviewWindowBuilder::from_config(&app, &config)
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?;
         // 未聚焦时浏览器收不到 keydown，导致 idle 阶段 Esc 无法退出
         let _ = win.set_focus();
     }

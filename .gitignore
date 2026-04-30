@@ -8,6 +8,7 @@ dist/
 src-tauri/target/
 src-tauri/nevermind.db
 src-tauri/nevermind.db-journal
+src-tauri/gen
 
 # Env
 .env
